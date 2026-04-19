@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: nosy-neighbour
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8000
+      # Add any API keys here - never commit real values, use Render dashboard instead
+      # - key: MY_API_KEY
+      #   sync: false
