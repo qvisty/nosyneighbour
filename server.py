@@ -7,16 +7,23 @@ Serves a map-based UI, a JSON REST API, and an MCP server at POST /mcp.
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+from jinja2 import Environment, FileSystemLoader
 from mcp.server.fastmcp import FastMCP
 import uvicorn
+from weasyprint import HTML
 
 from nosy_neighbour import TinglysningClient, get_loan_type_info
 
 DAWA_REVERSE_URL = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
+
+_templates_dir = Path(__file__).parent / "templates"
+_jinja_env = Environment(loader=FileSystemLoader(str(_templates_dir)), autoescape=True)
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +123,34 @@ def lookup(q: str = Query(...)):
     if tingbog is None:
         raise HTTPException(status_code=404, detail="No property data found")
     return _annotate_loan_types(tingbog)
+
+
+@app.get("/api/report")
+def report(q: str = Query(...)):
+    try:
+        postnummer, vejnavn, husnummer = _client.resolve_address(q)
+        tingbog = _client.lookup_address(postnummer, vejnavn, husnummer)
+    except RuntimeError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if tingbog is None:
+        raise HTTPException(status_code=404, detail="No property data found")
+    data = _annotate_loan_types(tingbog)
+
+    template = _jinja_env.get_template("report.html")
+    html_content = template.render(
+        data=data,
+        generated_at=datetime.now().strftime("%d-%m-%Y %H:%M"),
+    )
+    pdf_bytes = HTML(string=html_content).write_pdf()
+
+    address_slug = data.get("adresse", "ejendom").replace(" ", "_").replace(",", "")
+    filename = f"rapport_{address_slug}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page {
+      size: A4;
+      margin: 2cm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      color: #111;
+      line-height: 1.5;
+    }
+    h1 {
+      font-size: 22px;
+      margin: 0 0 4px;
+      color: #111;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 20px;
+    }
+    .generated {
+      font-size: 10px;
+      color: #9ca3af;
+      margin-bottom: 24px;
+    }
+    h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #2563eb;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 4px;
+      margin: 20px 0 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 12px;
+    }
+    td, th {
+      padding: 5px 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #f3f4f6;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: #374151;
+    }
+    td {
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .label {
+      color: #6b7280;
+      width: 140px;
+    }
+    .value {
+      font-weight: 500;
+    }
+    .mortgage-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .mortgage-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .mortgage-type {
+      font-weight: 600;
+    }
+    .mortgage-amount {
+      font-weight: 700;
+    }
+    .mortgage-meta {
+      font-size: 10px;
+      color: #6b7280;
+    }
+    .loan-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .badge-certain { background: #dcfce7; color: #166534; }
+    .badge-uncertain { background: #fee2e2; color: #991b1b; }
+    .easement {
+      font-size: 11px;
+      padding: 3px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .footer {
+      margin-top: 30px;
+      padding-top: 10px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 9px;
+      color: #9ca3af;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<h1>{{ data.adresse }}</h1>
+<div class="subtitle">{{ data.ejendomstype }}</div>
+<div class="generated">Rapport genereret {{ generated_at }}</div>
+
+{% if data.matrikler %}
+<h2>Matrikler</h2>
+<table>
+  <tr><th>Matrikelnummer</th><th>Ejerlav</th></tr>
+  {% for m in data.matrikler %}
+  <tr><td>{{ m.matrikelnummer }}</td><td>{{ m.landsejerlavnavn }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if data.vurdering %}
+<h2>Vurdering ({{ data.vurdering.vurderingsdato }})</h2>
+<table>
+  <tr><td class="label">Ejendomsv&aelig;rdi</td><td class="value">{{ "{:,}".format(data.vurdering.ejendomsvaerdi).replace(",", ".") }} kr.</td></tr>
+  <tr><td class="label">Grundv&aelig;rdi</td><td class="value">{{ "{:,}".format(data.vurdering.grundvaerdi).replace(",", ".") }} kr.</td></tr>
+  <tr><td class="label">Kommune</td><td class="value">{{ data.vurdering.kommune }}</td></tr>
+</table>
+{% endif %}
+
+{% if data.ejere %}
+<h2>Ejere</h2>
+<table>
+  <tr><th>Andel</th><th>Navn</th></tr>
+  {% for e in data.ejere %}
+  <tr><td>{{ e.andel }}</td><td>{{ e.navn }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if data.haeftelser %}
+<h2>H&aelig;ftelser</h2>
+{% for h in data.haeftelser %}
+<div class="mortgage-item">
+  <div class="mortgage-header">
+    <span class="mortgage-type">[{{ h.prioritet }}] {{ h.haeftelsestype }}</span>
+    <span class="mortgage-amount">{{ h.hovedstol }}</span>
+  </div>
+  <div class="mortgage-meta">
+    {{ h.rente }}% &middot; {{ "variabel" if h.fastvariabel == "variabel" else "fast" }}
+    {% if h.kreditorer %} &middot; {{ h.kreditorer | join(", ") }}{% endif %}
+  </div>
+  {% if h.loan_type_info %}
+    {% set lti = h.loan_type_info %}
+    {% if lti.source == "isin" %}
+      <span class="loan-badge badge-certain">{{ lti.loan_type }} (ISIN)</span>
+    {% elif lti.source == "estimated" and not lti.uncertain and lti.loan_type %}
+      <span class="loan-badge badge-certain">{{ lti.loan_type }} (estimeret)</span>
+    {% elif lti.source == "estimated" and lti.uncertain %}
+      <span class="loan-badge badge-uncertain">Usikker l&aring;ntype</span>
+    {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if data.servitutter %}
+<h2>Servitutter</h2>
+{% for s in data.servitutter %}
+<div class="easement">[{{ s.prioritet }}] {{ s.tekst }}</div>
+{% endfor %}
+{% endif %}
+
+<div class="footer">
+  Nosy Neighbour &mdash; Ejendomsrapport &mdash; Data fra tinglysning.dk
+</div>
+
+</body>
+</html>

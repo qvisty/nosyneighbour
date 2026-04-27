@@ -102,6 +102,14 @@
       padding: 0 2px; flex-shrink: 0;
     }
     .entry-remove:hover { color: #dc2626; }
+
+    .entry-pdf {
+      background: #2563eb; border: none; cursor: pointer;
+      color: #fff; font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 6px; flex-shrink: 0;
+    }
+    .entry-pdf:hover { background: #1d4ed8; }
+    .entry-pdf:disabled { background: #9ca3af; cursor: not-allowed; }
     .entry-divider { border: none; border-top: 2px solid #e5e7eb; margin: 8px 0; }
 
     .limit-notice {
@@ -420,6 +428,7 @@ function renderSidebar() {
       <div class="entry-header">
         <span class="entry-num">${i + 1}</span>
         <span class="entry-label">${entry.label}</span>
+        ${entry.data ? `<button class="entry-pdf" onclick="downloadPdf('${entry.label.replace(/'/g, "\\'")}')" title="Download PDF">PDF</button>` : ''}
         <button class="entry-remove" onclick="removeEntry(${i})" title="Fjern">×</button>
       </div>
     `));
@@ -572,6 +581,16 @@ function renderMortgage(h) {
       ${candidatesHtml}
     </div>
   `);
+}
+
+async function downloadPdf(label) {
+  const url = `/api/report?q=${encodeURIComponent(label)}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function fmt(n) {
