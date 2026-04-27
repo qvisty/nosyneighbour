@@ -96,11 +96,23 @@
     }
     .badge-certain { background: #dcfce7; color: #166534; }
     .badge-uncertain { background: #fee2e2; color: #991b1b; }
+    .isin-block {
+      margin-top: 6px;
+      padding: 6px 8px;
+      background: #f9fafb;
+      border-radius: 4px;
+      font-size: 10px;
+    }
+    .isin-block .isin-row { display: flex; justify-content: space-between; padding: 1px 0; }
+    .isin-block .isin-k { color: #6b7280; }
+    .isin-block .isin-v { font-weight: 500; }
     .easement {
       font-size: 11px;
       padding: 3px 0;
       border-bottom: 1px solid #f3f4f6;
     }
+    .equity-positive { color: #166534; font-weight: 700; }
+    .equity-negative { color: #991b1b; font-weight: 700; }
     .footer {
       margin-top: 30px;
       padding-top: 10px;
@@ -108,6 +120,12 @@
       font-size: 9px;
       color: #9ca3af;
       text-align: center;
+    }
+    .small-note {
+      font-size: 9px;
+      color: #9ca3af;
+      margin-top: -8px;
+      margin-bottom: 12px;
     }
   </style>
 </head>
@@ -133,6 +151,33 @@
   <tr><td class="label">Ejendomsv&aelig;rdi</td><td class="value">{{ "{:,}".format(data.vurdering.ejendomsvaerdi).replace(",", ".") }} kr.</td></tr>
   <tr><td class="label">Grundv&aelig;rdi</td><td class="value">{{ "{:,}".format(data.vurdering.grundvaerdi).replace(",", ".") }} kr.</td></tr>
   <tr><td class="label">Kommune</td><td class="value">{{ data.vurdering.kommune }}</td></tr>
+  {% if equity and equity.total_debt > 0 %}
+  <tr><td class="label">Samlet pant (est.)</td><td class="value">{{ "{:,}".format(equity.total_debt).replace(",", ".") }} kr.</td></tr>
+  <tr>
+    <td class="label">Friv&aelig;rdi (est.)</td>
+    <td class="{{ 'equity-negative' if equity.frivaerdi < 0 else 'equity-positive' }}">
+      {{ "{:,}".format(equity.frivaerdi).replace(",", ".") }} kr.
+      {% if equity.frivaerdi_pct is not none %} ({{ equity.frivaerdi_pct }}%){% endif %}
+    </td>
+  </tr>
+  {% endif %}
+</table>
+{% if equity and equity.total_debt > 0 %}
+<div class="small-note">Friv&aelig;rdi er estimeret ud fra antagelse om 10 &aring;rs afdragsfrihed efterfulgt af 20 &aring;rs annuitet for realkreditl&aring;n.</div>
+{% endif %}
+{% endif %}
+
+{% if valuations and valuations.history and valuations.history|length > 1 %}
+<h2>Vurderingshistorik</h2>
+<table>
+  <tr><th>&Aring;r</th><th>Ejendomsv&aelig;rdi</th><th>Grundv&aelig;rdi</th></tr>
+  {% for h in valuations.history %}
+  <tr>
+    <td>{{ h.year }}</td>
+    <td>{% if h.ejendomsvaerdi %}{{ "{:,}".format(h.ejendomsvaerdi).replace(",", ".") }} kr.{% else %}&mdash;{% endif %}</td>
+    <td>{% if h.grundvaerdi %}{{ "{:,}".format(h.grundvaerdi).replace(",", ".") }} kr.{% else %}&mdash;{% endif %}</td>
+  </tr>
+  {% endfor %}
 </table>
 {% endif %}
 
@@ -157,13 +202,28 @@
   <div class="mortgage-meta">
     {{ h.rente }}% &middot; {{ "variabel" if h.fastvariabel == "variabel" else "fast" }}
     {% if h.kreditorer %} &middot; {{ h.kreditorer | join(", ") }}{% endif %}
+    {% if h.alias %} &middot; {{ h.alias.split("-")[0] }}{% endif %}
   </div>
   {% if h.loan_type_info %}
     {% set lti = h.loan_type_info %}
     {% if lti.source == "isin" %}
       <span class="loan-badge badge-certain">{{ lti.loan_type }} (ISIN)</span>
+      <div class="isin-block">
+        {% if lti.isin %}<div class="isin-row"><span class="isin-k">ISIN</span><span class="isin-v">{{ lti.isin }}</span></div>{% endif %}
+        {% if lti.short_name %}<div class="isin-row"><span class="isin-k">Obligation</span><span class="isin-v">{{ lti.short_name }}</span></div>{% endif %}
+        {% if lti.ticker %}<div class="isin-row"><span class="isin-k">Ticker</span><span class="isin-v">{{ lti.ticker }}</span></div>{% endif %}
+        {% if lti.maturity %}<div class="isin-row"><span class="isin-k">Udl&oslash;b</span><span class="isin-v">{{ lti.maturity }}</span></div>{% endif %}
+        {% if lti.coupon is not none %}<div class="isin-row"><span class="isin-k">Kupon</span><span class="isin-v">{{ lti.coupon }}%</span></div>{% endif %}
+      </div>
     {% elif lti.source == "estimated" and not lti.uncertain and lti.loan_type %}
       <span class="loan-badge badge-certain">{{ lti.loan_type }} (estimeret)</span>
+      {% if lti.candidates %}
+      <div class="isin-block">
+        {% for c in lti.candidates %}
+          <div class="isin-row"><span class="isin-k">{{ c.name }}</span><span class="isin-v">&Delta; {{ "%.4f"|format(c.delta) }}%</span></div>
+        {% endfor %}
+      </div>
+      {% endif %}
     {% elif lti.source == "estimated" and lti.uncertain %}
       <span class="loan-badge badge-uncertain">Usikker l&aring;ntype</span>
     {% endif %}
@@ -179,8 +239,30 @@
 {% endfor %}
 {% endif %}
 
+{% if transport and transport.stops %}
+<h2>Offentlig transport</h2>
+<table>
+  <tr><th>Stop</th><th>Afstand</th></tr>
+  {% for s in transport.stops %}
+  <tr><td>{{ s.name }}</td><td>{{ s.distance }} m</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if climate_latest %}
+<h2>Klima{% if climate and climate.kommune %} &mdash; {{ climate.kommune }}{% endif %}</h2>
+<table>
+  {% for c in climate_latest %}
+  <tr>
+    <td class="label">{{ c.label }}</td>
+    <td class="value">{{ c.value }} {{ c.unit }} ({{ c.year }})</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 <div class="footer">
-  Nosy Neighbour &mdash; Ejendomsrapport &mdash; Data fra tinglysning.dk
+  Nosy Neighbour &mdash; Ejendomsrapport &mdash; Data fra tinglysning.dk, DAWA, DMI, Rejseplanen
 </div>
 
 </body>

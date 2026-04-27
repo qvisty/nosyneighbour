@@ -181,6 +181,18 @@
     .badge-close    { background: #fef9c3; color: #854d0e; }
     .badge-uncertain { background: #fee2e2; color: #991b1b; }
 
+    .isin-details {
+      margin-top: 6px;
+      padding: 6px 8px;
+      background: #f9fafb;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #374151;
+    }
+    .isin-details .row { display: flex; justify-content: space-between; padding: 1px 0; }
+    .isin-details .k { color: #6b7280; }
+    .isin-details .v { font-weight: 500; }
+
     .candidates {
       margin-top: 6px;
       font-size: 12px;
@@ -197,6 +209,7 @@
 
     /* ── Valuation chart ── */
     .valuation-chart-wrap { position: relative; height: 160px; margin-top: 8px; }
+    .climate-chart-wrap { position: relative; height: 140px; margin-top: 10px; }
 
     /* ── Transport ── */
     .stop-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
@@ -636,12 +649,12 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
   // Climate data
   if (climate && climate.parameters && Object.keys(climate.parameters).length > 0) {
     const labels = {
-      mean_temp: ['Gns. temperatur', '°C'],
-      mean_daily_max_temp: ['Gns. daglig maks.', '°C'],
-      mean_daily_min_temp: ['Gns. daglig min.', '°C'],
-      acc_precip: ['Nedbør (år)', 'mm'],
-      mean_wind_speed: ['Gns. vindstyrke', 'm/s'],
-      bright_sunshine: ['Solskinstimer (år)', 'timer'],
+      mean_temp: ['Gns. temperatur', '°C', '#f59e0b'],
+      mean_daily_max_temp: ['Gns. daglig maks.', '°C', '#dc2626'],
+      mean_daily_min_temp: ['Gns. daglig min.', '°C', '#2563eb'],
+      acc_precip: ['Nedbør (år)', 'mm', '#0ea5e9'],
+      mean_wind_speed: ['Gns. vindstyrke', 'm/s', '#10b981'],
+      bright_sunshine: ['Solskinstimer (år)', 'timer', '#eab308'],
     };
     const latest = {};
     for (const [key, vals] of Object.entries(climate.parameters)) {
@@ -651,13 +664,54 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
       .filter(([k]) => labels[k])
       .map(([k, v]) => `<tr><td>${labels[k][0]}</td><td>${v.value} ${labels[k][1]} (${v.year})</td></tr>`)
       .join('');
+
+    const tempKeys = ['mean_daily_max_temp', 'mean_temp', 'mean_daily_min_temp']
+      .filter(k => climate.parameters[k] && climate.parameters[k].length > 1);
+    const hasTempChart = tempKeys.length > 0;
+
     if (rows) {
       container.appendChild(html(`
         <div class="card">
           <div class="card-title">Klima — ${climate.kommune || ''}</div>
           <table>${rows}</table>
+          ${hasTempChart ? `<div class="climate-chart-wrap"><canvas id="cchart-${entryIdx}"></canvas></div>` : ''}
         </div>
       `));
+
+      if (hasTempChart) {
+        setTimeout(() => {
+          const canvas = document.getElementById(`cchart-${entryIdx}`);
+          if (!canvas) return;
+          const allYears = new Set();
+          tempKeys.forEach(k => climate.parameters[k].forEach(p => allYears.add(p.year)));
+          const years = [...allYears].sort();
+          const datasets = tempKeys.map(k => {
+            const [lbl, , color] = labels[k];
+            const byYear = Object.fromEntries(climate.parameters[k].map(p => [p.year, p.value]));
+            return {
+              label: lbl,
+              data: years.map(y => byYear[y] ?? null),
+              borderColor: color,
+              backgroundColor: color + '20',
+              tension: 0.3,
+              spanGaps: true,
+            };
+          });
+          new Chart(canvas, {
+            type: 'line',
+            data: { labels: years, datasets },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+              scales: {
+                y: { ticks: { font: { size: 10 }, callback: v => v + '°' } },
+                x: { ticks: { font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+              },
+            },
+          });
+        }, 50);
+      }
     }
   }
 }
@@ -670,10 +724,23 @@ function renderMortgage(h) {
 
   let badgeHtml = '';
   let candidatesHtml = '';
+  let isinHtml = '';
 
   if (lti && isVariable) {
     if (lti.source === 'isin') {
       badgeHtml = `<span class="loan-type-badge badge-certain">${lti.loan_type} (ISIN)</span>`;
+      const rows = [
+        ['ISIN', lti.isin],
+        ['Obligation', lti.short_name],
+        ['Ticker', lti.ticker],
+        ['Udløb', lti.maturity],
+        ['Kupon', lti.coupon != null ? `${lti.coupon}%` : null],
+      ].filter(([, v]) => v);
+      if (rows.length) {
+        isinHtml = `<div class="isin-details">${rows.map(([k, v]) =>
+          `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`
+        ).join('')}</div>`;
+      }
     } else if (lti.source === 'estimated') {
       if (lti.uncertain) {
         badgeHtml = `<span class="loan-type-badge badge-uncertain">Usikker (lav rente — ældre lån?)</span>`;
@@ -708,6 +775,7 @@ function renderMortgage(h) {
         ${regDate ? ' · ' + regDate : ''}
       </div>
       ${badgeHtml}
+      ${isinHtml}
       ${candidatesHtml}
     </div>
   `);
