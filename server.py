@@ -196,6 +196,39 @@ def valuations(q: str = Query(...)):
     }
 
 
+REJSEPLANEN_NEARBY_URL = "http://xmlopen.rejseplanen.dk/bin/rest.exe/location.nearbystops"
+
+
+@app.get("/api/transport")
+def transport(lat: float = Query(...), lng: float = Query(...), max_results: int = Query(8)):
+    """Return nearby public transport stops from Rejseplanen."""
+    resp = requests.get(REJSEPLANEN_NEARBY_URL, params={
+        "coordX": str(int(lng * 1_000_000)),
+        "coordY": str(int(lat * 1_000_000)),
+        "maxNo": max_results,
+        "format": "json",
+    }, timeout=10)
+    if not resp.ok:
+        raise HTTPException(status_code=502, detail="Rejseplanen API error")
+    data = resp.json()
+    stops_raw = data.get("LocationList", {}).get("StopLocation", [])
+    if isinstance(stops_raw, dict):
+        stops_raw = [stops_raw]
+    stops = []
+    for s in stops_raw:
+        try:
+            stops.append({
+                "name": s.get("name", ""),
+                "lat": int(s.get("y", 0)) / 1_000_000,
+                "lng": int(s.get("x", 0)) / 1_000_000,
+                "distance": int(s.get("distance", 0)),
+                "id": s.get("id", ""),
+            })
+        except (ValueError, TypeError):
+            continue
+    return {"stops": stops}
+
+
 @app.get("/api/report")
 def report(q: str = Query(...)):
     try:
