@@ -195,6 +195,9 @@
     .assumption-tab { flex: 1; padding: 4px 6px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 11px; cursor: pointer; background: #f9fafb; color: #374151; text-align: center; }
     .assumption-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
 
+    /* ── Valuation chart ── */
+    .valuation-chart-wrap { position: relative; height: 160px; margin-top: 8px; }
+
     /* ── Easements ── */
     .easement { font-size: 12px; color: #374151; padding: 3px 0; border-bottom: 1px solid #f3f4f6; }
     .easement:last-child { border-bottom: none; }
@@ -245,6 +248,7 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
 // ── Map setup ──────────────────────────────────────────────────────────────
 const map = L.map('map').setView([56.0, 10.5], 7);
@@ -369,7 +373,7 @@ async function addAddress(label, lat, lng) {
   const marker = L.marker([lat, lng], { icon: numberedIcon(idx + 1) }).addTo(map);
   marker.on('click', () => scrollToEntry(idx));
 
-  const entry = { label, lat, lng, data: null, error: null, loading: true, marker };
+  const entry = { label, lat, lng, data: null, valuations: null, error: null, loading: true, marker };
   entries.push(entry);
   renderSidebar();
 
@@ -388,6 +392,17 @@ async function addAddress(label, lat, lng) {
   entry.loading = false;
   renderSidebar();
   scrollToEntry(idx);
+
+  // Fetch historical valuations in background
+  if (entry.data) {
+    try {
+      const vRes = await fetch(`/api/valuations?q=${encodeURIComponent(label)}`);
+      if (vRes.ok) {
+        entry.valuations = await vRes.json();
+        renderSidebar();
+      }
+    } catch { /* ignore */ }
+  }
 }
 
 function removeEntry(i) {
@@ -438,7 +453,7 @@ function renderSidebar() {
     } else if (entry.error) {
       section.appendChild(html(`<div style="color:#dc2626;padding:4px 0 10px">${entry.error}</div>`));
     } else if (entry.data) {
-      renderEntryCards(section, entry.data);
+      renderEntryCards(section, entry.data, entry.valuations, i);
     }
 
     el.appendChild(section);
@@ -448,7 +463,7 @@ function renderSidebar() {
   });
 }
 
-function renderEntryCards(container, d) {
+function renderEntryCards(container, d, valuations, entryIdx) {
   container.appendChild(html(`
     <div class="card">
       <div class="address-header">${d.adresse}</div>
@@ -529,6 +544,54 @@ function renderEntryCards(container, d) {
         ${d.servitutter.map(s => `<div class="easement">[${s.prioritet}] ${s.tekst}</div>`).join('')}
       </div>
     `));
+  }
+
+  // Valuation history chart
+  if (valuations && valuations.history && valuations.history.length > 1) {
+    const chartCard = html(`
+      <div class="card">
+        <div class="card-title">Vurderingshistorik</div>
+        <div class="valuation-chart-wrap"><canvas id="vchart-${entryIdx}"></canvas></div>
+      </div>
+    `);
+    container.appendChild(chartCard);
+    setTimeout(() => {
+      const canvas = document.getElementById(`vchart-${entryIdx}`);
+      if (!canvas) return;
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: valuations.history.map(h => h.year),
+          datasets: [
+            {
+              label: 'Ejendomsværdi',
+              data: valuations.history.map(h => h.ejendomsvaerdi),
+              borderColor: '#2563eb',
+              backgroundColor: 'rgba(37,99,235,0.1)',
+              fill: true,
+              tension: 0.3,
+            },
+            {
+              label: 'Grundværdi',
+              data: valuations.history.map(h => h.grundvaerdi),
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16,185,129,0.1)',
+              fill: true,
+              tension: 0.3,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+          scales: {
+            y: { ticks: { callback: v => (v/1000000).toFixed(1) + 'M' } },
+            x: { ticks: { font: { size: 10 } } },
+          },
+        },
+      });
+    }, 50);
   }
 }
 

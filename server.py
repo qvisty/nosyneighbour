@@ -125,6 +125,77 @@ def lookup(q: str = Query(...)):
     return _annotate_loan_types(tingbog)
 
 
+@app.get("/api/valuations")
+def valuations(q: str = Query(...)):
+    """Return historical property valuations as a time series."""
+    try:
+        postnummer, vejnavn, husnummer = _client.resolve_address(q)
+        tingbog = _client.lookup_address(postnummer, vejnavn, husnummer)
+    except RuntimeError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if tingbog is None:
+        raise HTTPException(status_code=404, detail="No property data found")
+
+    # Try to get historical valuations from SVUR via Dataforsyningen
+    kommune = tingbog.get("vurdering", {}).get("kommune", "")
+    matrikler = tingbog.get("matrikler", [])
+    history = []
+
+    if matrikler:
+        matrikel = matrikler[0]
+        ejerlav_kode = matrikel.get("ejerlavskode")
+        matrikel_nr = matrikel.get("matrikelnummer")
+        if ejerlav_kode and matrikel_nr:
+            try:
+                resp = requests.get(
+                    "https://services.datafordeler.dk/SVUR/SVURStamdata/1/REST/Vurderingsejendom",
+                    params={
+                        "EjerlavId": ejerlav_kode,
+                        "MatrikelNr": matrikel_nr,
+                        "format": "json",
+                        "username": "FHXMXWCVMN",
+                        "password": "Nosy2025!",
+                    },
+                    timeout=10,
+                )
+                if resp.ok:
+                    data = resp.json()
+                    for item in data if isinstance(data, list) else data.get("features", data.get("items", [])):
+                        props = item.get("properties", item) if isinstance(item, dict) else {}
+                        year = props.get("vurderingsaar") or props.get("vurderingAar")
+                        ejendomsvaerdi = props.get("ejendomsvaerdi") or props.get("ejendomsVaerdi")
+                        grundvaerdi = props.get("grundvaerdi") or props.get("grundVaerdi")
+                        if year and (ejendomsvaerdi or grundvaerdi):
+                            history.append({
+                                "year": int(year),
+                                "ejendomsvaerdi": int(ejendomsvaerdi) if ejendomsvaerdi else None,
+                                "grundvaerdi": int(grundvaerdi) if grundvaerdi else None,
+                            })
+            except Exception:
+                pass
+
+    # Always include the current valuation from tingbog
+    current = tingbog.get("vurdering")
+    if current:
+        year_str = current.get("vurderingsdato", "")[:4]
+        if year_str:
+            current_year = int(year_str)
+            if not any(h["year"] == current_year for h in history):
+                history.append({
+                    "year": current_year,
+                    "ejendomsvaerdi": current.get("ejendomsvaerdi"),
+                    "grundvaerdi": current.get("grundvaerdi"),
+                })
+
+    history.sort(key=lambda x: x["year"])
+
+    return {
+        "adresse": tingbog.get("adresse"),
+        "kommune": kommune,
+        "history": history,
+    }
+
+
 @app.get("/api/report")
 def report(q: str = Query(...)):
     try:
