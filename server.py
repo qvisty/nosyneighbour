@@ -197,6 +197,51 @@ def valuations(q: str = Query(...)):
 
 
 REJSEPLANEN_NEARBY_URL = "http://xmlopen.rejseplanen.dk/bin/rest.exe/location.nearbystops"
+DMI_CLIMATE_URL = "https://dmigw.govcloud.dk/v2/climateData/collections/municipalityValue/items"
+DMI_API_KEY = os.environ.get("DMI_API_KEY", "")
+
+
+@app.get("/api/climate")
+def climate(lat: float = Query(...), lng: float = Query(...)):
+    """Return climate normals for the nearest municipality from DMI."""
+    # First resolve lat/lng to municipality via DAWA
+    resp = requests.get(DAWA_REVERSE_URL, params={"x": lng, "y": lat})
+    if not resp.ok:
+        raise HTTPException(status_code=404, detail="Could not resolve location")
+    kommune_kode = resp.json().get("kommune", {}).get("kode")
+    kommune_navn = resp.json().get("kommune", {}).get("navn", "")
+    if not kommune_kode:
+        raise HTTPException(status_code=404, detail="Could not determine municipality")
+
+    # Fetch climate normals from DMI
+    params = {
+        "municipalityId": kommune_kode,
+        "timeResolution": "year",
+        "limit": 30,
+        "api-key": DMI_API_KEY,
+    }
+    climate_data = {"kommune": kommune_navn, "parameters": {}}
+
+    for param_id in ["mean_temp", "mean_daily_max_temp", "mean_daily_min_temp",
+                      "acc_precip", "mean_wind_speed", "bright_sunshine"]:
+        try:
+            resp = requests.get(DMI_CLIMATE_URL, params={**params, "parameterId": param_id}, timeout=10)
+            if resp.ok:
+                features = resp.json().get("features", [])
+                values = []
+                for f in features:
+                    props = f.get("properties", {})
+                    val = props.get("value")
+                    time_str = props.get("from", "")[:4]
+                    if val is not None and time_str:
+                        values.append({"year": int(time_str), "value": round(val, 1)})
+                if values:
+                    values.sort(key=lambda x: x["year"])
+                    climate_data["parameters"][param_id] = values
+        except Exception:
+            continue
+
+    return climate_data
 
 
 @app.get("/api/transport")

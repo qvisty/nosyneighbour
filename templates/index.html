@@ -401,12 +401,16 @@ async function addAddress(label, lat, lng) {
 
   // Fetch historical valuations and transport in background
   if (entry.data) {
-    const [vRes, tRes] = await Promise.allSettled([
+    const [vRes, tRes, cRes] = await Promise.allSettled([
       fetch(`/api/valuations?q=${encodeURIComponent(label)}`),
       fetch(`/api/transport?lat=${lat}&lng=${lng}`),
+      fetch(`/api/climate?lat=${lat}&lng=${lng}`),
     ]);
     if (vRes.status === 'fulfilled' && vRes.value.ok) {
       entry.valuations = await vRes.value.json();
+    }
+    if (cRes.status === 'fulfilled' && cRes.value.ok) {
+      entry.climate = await cRes.value.json();
     }
     if (tRes.status === 'fulfilled' && tRes.value.ok) {
       entry.transport = await tRes.value.json();
@@ -473,7 +477,7 @@ function renderSidebar() {
     } else if (entry.error) {
       section.appendChild(html(`<div style="color:#dc2626;padding:4px 0 10px">${entry.error}</div>`));
     } else if (entry.data) {
-      renderEntryCards(section, entry.data, entry.valuations, entry.transport, i);
+      renderEntryCards(section, entry.data, entry.valuations, entry.transport, entry.climate, i);
     }
 
     el.appendChild(section);
@@ -483,7 +487,7 @@ function renderSidebar() {
   });
 }
 
-function renderEntryCards(container, d, valuations, transport, entryIdx) {
+function renderEntryCards(container, d, valuations, transport, climate, entryIdx) {
   container.appendChild(html(`
     <div class="card">
       <div class="address-header">${d.adresse}</div>
@@ -627,6 +631,34 @@ function renderEntryCards(container, d, valuations, transport, entryIdx) {
         `).join('')}
       </div>
     `));
+  }
+
+  // Climate data
+  if (climate && climate.parameters && Object.keys(climate.parameters).length > 0) {
+    const labels = {
+      mean_temp: ['Gns. temperatur', '°C'],
+      mean_daily_max_temp: ['Gns. daglig maks.', '°C'],
+      mean_daily_min_temp: ['Gns. daglig min.', '°C'],
+      acc_precip: ['Nedbør (år)', 'mm'],
+      mean_wind_speed: ['Gns. vindstyrke', 'm/s'],
+      bright_sunshine: ['Solskinstimer (år)', 'timer'],
+    };
+    const latest = {};
+    for (const [key, vals] of Object.entries(climate.parameters)) {
+      if (vals.length > 0) latest[key] = vals[vals.length - 1];
+    }
+    const rows = Object.entries(latest)
+      .filter(([k]) => labels[k])
+      .map(([k, v]) => `<tr><td>${labels[k][0]}</td><td>${v.value} ${labels[k][1]} (${v.year})</td></tr>`)
+      .join('');
+    if (rows) {
+      container.appendChild(html(`
+        <div class="card">
+          <div class="card-title">Klima — ${climate.kommune || ''}</div>
+          <table>${rows}</table>
+        </div>
+      `));
+    }
   }
 }
 
