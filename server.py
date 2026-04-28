@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 import uvicorn
 from weasyprint import HTML
 
-from nosy_neighbour import TinglysningClient, get_loan_type_info
+from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend
 
 DAWA_REVERSE_URL = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
 
@@ -136,62 +136,52 @@ def valuations(q: str = Query(...)):
     if tingbog is None:
         raise HTTPException(status_code=404, detail="No property data found")
 
-    # Try to get historical valuations from SVUR via Dataforsyningen
-    kommune = tingbog.get("vurdering", {}).get("kommune", "")
-    matrikler = tingbog.get("matrikler", [])
+    vurdering = tingbog.get("vurdering") or {}
+    kommune = vurdering.get("kommune", "")
+    if not kommune:
+        raise HTTPException(status_code=404, detail="No valuation data for this property")
+
+    kode = kommune_kode(kommune)
+    if not kode:
+        raise HTTPException(status_code=404, detail=f"Unknown municipality: {kommune}")
+
+    # Use DST EJ67 regional price index to estimate historical valuations
+    trend = fetch_price_trend(
+        kommunekode=kode,
+        ejendomstype=tingbog.get("ejendomstype"),
+        current_ejendomsvaerdi=vurdering.get("ejendomsvaerdi"),
+        current_grundvaerdi=vurdering.get("grundvaerdi"),
+        vurderingsdato=vurdering.get("vurderingsdato"),
+    )
+
+    # Build history array compatible with the existing frontend chart
     history = []
+    if trend and trend.get("vurderinger"):
+        for v in trend["vurderinger"]:
+            history.append({
+                "year": int(v["aar"]),
+                "ejendomsvaerdi": v.get("ejendomsvaerdi_est"),
+                "grundvaerdi": v.get("grundvaerdi_est"),
+            })
 
-    if matrikler:
-        matrikel = matrikler[0]
-        ejerlav_kode = matrikel.get("ejerlavskode")
-        matrikel_nr = matrikel.get("matrikelnummer")
-        if ejerlav_kode and matrikel_nr:
-            try:
-                resp = requests.get(
-                    "https://services.datafordeler.dk/SVUR/SVURStamdata/1/REST/Vurderingsejendom",
-                    params={
-                        "EjerlavId": ejerlav_kode,
-                        "MatrikelNr": matrikel_nr,
-                        "format": "json",
-                        "username": "FHXMXWCVMN",
-                        "password": "Nosy2025!",
-                    },
-                    timeout=10,
-                )
-                if resp.ok:
-                    data = resp.json()
-                    for item in data if isinstance(data, list) else data.get("features", data.get("items", [])):
-                        props = item.get("properties", item) if isinstance(item, dict) else {}
-                        year = props.get("vurderingsaar") or props.get("vurderingAar")
-                        ejendomsvaerdi = props.get("ejendomsvaerdi") or props.get("ejendomsVaerdi")
-                        grundvaerdi = props.get("grundvaerdi") or props.get("grundVaerdi")
-                        if year and (ejendomsvaerdi or grundvaerdi):
-                            history.append({
-                                "year": int(year),
-                                "ejendomsvaerdi": int(ejendomsvaerdi) if ejendomsvaerdi else None,
-                                "grundvaerdi": int(grundvaerdi) if grundvaerdi else None,
-                            })
-            except Exception:
-                pass
-
-    # Always include the current valuation from tingbog
-    current = tingbog.get("vurdering")
-    if current:
-        year_str = current.get("vurderingsdato", "")[:4]
-        if year_str:
-            current_year = int(year_str)
-            if not any(h["year"] == current_year for h in history):
-                history.append({
-                    "year": current_year,
-                    "ejendomsvaerdi": current.get("ejendomsvaerdi"),
-                    "grundvaerdi": current.get("grundvaerdi"),
-                })
+    # Always include the actual current valuation (replaces any estimate for that year)
+    current_year_str = vurdering.get("vurderingsdato", "")[:4]
+    if current_year_str:
+        current_year = int(current_year_str)
+        history = [h for h in history if h["year"] != current_year]
+        history.append({
+            "year": current_year,
+            "ejendomsvaerdi": vurdering.get("ejendomsvaerdi"),
+            "grundvaerdi": vurdering.get("grundvaerdi"),
+        })
 
     history.sort(key=lambda x: x["year"])
 
     return {
         "adresse": tingbog.get("adresse"),
         "kommune": kommune,
+        "kilde": trend["kilde"] if trend else None,
+        "region": trend["region"] if trend else None,
         "history": history,
     }
 

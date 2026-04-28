@@ -572,10 +572,14 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
 
   // Valuation history chart
   if (valuations && valuations.history && valuations.history.length > 1) {
+    const cutoff = new Date().getFullYear() - 25;
+    const filtered = valuations.history.filter(h => h.year >= cutoff);
+    const labels = filtered.map(h => h.year);
     const chartCard = html(`
       <div class="card">
-        <div class="card-title">Vurderingshistorik</div>
+        <div class="card-title">Pristrend</div>
         <div class="valuation-chart-wrap"><canvas id="vchart-${entryIdx}"></canvas></div>
+        ${valuations.kilde ? `<div style="font-size:10px;color:#9ca3af;margin-top:4px">Kilde: ${valuations.kilde} — ${valuations.region || ''}</div>` : ''}
       </div>
     `);
     container.appendChild(chartCard);
@@ -585,33 +589,41 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
       new Chart(canvas, {
         type: 'line',
         data: {
-          labels: valuations.history.map(h => h.year),
+          labels,
           datasets: [
             {
-              label: 'Ejendomsværdi',
-              data: valuations.history.map(h => h.ejendomsvaerdi),
+              label: 'Ejendomsværdi (est.)',
+              data: filtered.map(h => h.ejendomsvaerdi),
               borderColor: '#2563eb',
-              backgroundColor: 'rgba(37,99,235,0.1)',
+              backgroundColor: 'rgba(37,99,235,0.08)',
               fill: true,
               tension: 0.3,
+              borderWidth: 2,
+              pointRadius: 1.5,
             },
             {
-              label: 'Grundværdi',
-              data: valuations.history.map(h => h.grundvaerdi),
-              borderColor: '#10b981',
-              backgroundColor: 'rgba(16,185,129,0.1)',
+              label: 'Grundværdi (est.)',
+              data: filtered.map(h => h.grundvaerdi),
+              borderColor: '#16a34a',
+              backgroundColor: 'rgba(22,163,74,0.06)',
               fill: true,
               tension: 0.3,
+              borderWidth: 2,
+              pointRadius: 1.5,
             },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)} kr.` } },
+          },
           scales: {
-            y: { ticks: { callback: v => (v/1000000).toFixed(1) + 'M' } },
-            x: { ticks: { font: { size: 10 } } },
+            y: { ticks: { font: { size: 10 }, callback: v => v >= 1000000 ? (v/1000000).toFixed(1) + ' mio' : fmt(v) } },
+            x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
           },
         },
       });

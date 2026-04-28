@@ -60,6 +60,154 @@ _FIRDS_LOAN_TYPE_PATTERNS = [
 ]
 
 
+# Danish municipality name → 3-digit DST code mapping
+_KOMMUNE_KODER = {
+    "København": "101", "Frederiksberg": "147", "Dragør": "155",
+    "Tårnby": "185", "Albertslund": "165", "Ballerup": "151",
+    "Brøndby": "153", "Gentofte": "157", "Gladsaxe": "159",
+    "Glostrup": "161", "Herlev": "163", "Hvidovre": "167",
+    "Høje-Taastrup": "169", "Ishøj": "183", "Lyngby-Taarbæk": "173",
+    "Rødovre": "175", "Vallensbæk": "187", "Allerød": "201",
+    "Egedal": "240", "Fredensborg": "210", "Frederikssund": "250",
+    "Furesø": "190", "Gribskov": "270", "Halsnæs": "260",
+    "Helsingør": "217", "Hillerød": "219", "Hørsholm": "223",
+    "Rudersdal": "230", "Bornholm": "400",
+    "Greve": "253", "Køge": "259", "Lejre": "350",
+    "Roskilde": "265", "Solrød": "269", "Faxe": "320",
+    "Guldborgsund": "376", "Holbæk": "316", "Kalundborg": "326",
+    "Lolland": "360", "Næstved": "370", "Odsherred": "306",
+    "Ringsted": "329", "Slagelse": "330", "Sorø": "340",
+    "Stevns": "336", "Vordingborg": "390",
+    "Assens": "420", "Faaborg-Midtfyn": "430", "Kerteminde": "440",
+    "Langeland": "482", "Middelfart": "410", "Nordfyns": "480",
+    "Nyborg": "450", "Odense": "461", "Svendborg": "479",
+    "Ærø": "492", "Billund": "530", "Esbjerg": "561",
+    "Fanø": "563", "Fredericia": "607", "Haderslev": "510",
+    "Kolding": "621", "Sønderborg": "540", "Tønder": "550",
+    "Varde": "573", "Vejen": "575", "Vejle": "630",
+    "Aabenraa": "580",
+    "Favrskov": "710", "Hedensted": "766", "Horsens": "615",
+    "Norddjurs": "707", "Odder": "727", "Randers": "730",
+    "Samsø": "741", "Silkeborg": "740", "Skanderborg": "746",
+    "Syddjurs": "706", "Aarhus": "751",
+    "Herning": "657", "Holstebro": "661", "Ikast-Brande": "756",
+    "Lemvig": "665", "Ringkøbing-Skjern": "760", "Skive": "779",
+    "Struer": "671", "Viborg": "791",
+    "Brønderslev": "810", "Frederikshavn": "813", "Hjørring": "860",
+    "Jammerbugt": "849", "Læsø": "825", "Mariagerfjord": "846",
+    "Morsø": "773", "Rebild": "840", "Thisted": "787",
+    "Vesthimmerlands": "820", "Aalborg": "851",
+}
+
+
+def kommune_kode(kommune_navn: str) -> str | None:
+    """Map a Danish municipality name to its 3-digit DST code."""
+    return _KOMMUNE_KODER.get(kommune_navn)
+
+
+# DST region (landsdel) codes for EJ67 price index.
+_KOMMUNE_TIL_LANDSDEL = {}
+_LANDSDEL_KOMMUNER = {
+    "01": ["101"],
+    "02": ["147", "151", "153", "155", "157", "159", "161", "163", "165",
+           "167", "169", "173", "175", "183", "185", "187", "190", "230", "240"],
+    "03": ["201", "210", "217", "219", "223", "250", "260", "270"],
+    "04": ["400"],
+    "05": ["253", "259", "265", "269", "320", "329", "336", "350"],
+    "06": ["306", "316", "326", "330", "340", "360", "370", "376", "390"],
+    "07": ["410", "420", "430", "440", "450", "461", "479", "480", "482", "492"],
+    "08": ["510", "530", "540", "550", "561", "563", "573", "575", "580",
+           "607", "621", "630"],
+    "09": ["615", "706", "707", "710", "727", "730", "740", "741", "746", "751", "756", "766"],
+    "10": ["657", "661", "665", "671", "760", "773", "779", "791"],
+    "11": ["787", "810", "813", "820", "825", "840", "846", "849", "851", "860"],
+}
+for _ld, _ks in _LANDSDEL_KOMMUNER.items():
+    for _k in _ks:
+        _KOMMUNE_TIL_LANDSDEL[_k] = _ld
+
+_EJENDOMSTYPE_TIL_EJKAT = {
+    "Ejerlejlighed": "2103",
+    "Fritidshus": "0801",
+    "Sommerhus": "0801",
+}
+_DEFAULT_EJKAT = "0111"
+
+
+def fetch_price_trend(kommunekode: str, ejendomstype: str | None = None,
+                      current_ejendomsvaerdi: int | None = None,
+                      current_grundvaerdi: int | None = None,
+                      vurderingsdato: str | None = None) -> dict | None:
+    """Fetch historical property price trend using DST EJ67 price index.
+
+    Uses the regional price index to estimate historical valuations based on
+    the current official valuation (anchored at the vurderingsdato year).
+    """
+    landsdel = _KOMMUNE_TIL_LANDSDEL.get(kommunekode, "000")
+    ejkat = _EJENDOMSTYPE_TIL_EJKAT.get(ejendomstype or "", _DEFAULT_EJKAT)
+
+    try:
+        resp = requests.post(DST_API_URL, json={
+            "table": "EJ67",
+            "format": "JSONSTAT",
+            "lang": "da",
+            "variables": [
+                {"code": "OMRÅDE", "values": [landsdel]},
+                {"code": "EJENDOMSKATE", "values": [ejkat]},
+                {"code": "TAL", "values": ["100"]},
+                {"code": "Tid", "values": ["*"]},
+            ],
+        }, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return None
+
+    values = data["dataset"]["value"]
+    dims = data["dataset"]["dimension"]
+    years = list(dims["Tid"]["category"]["label"].values())
+    region_label = list(dims["OMRÅDE"]["category"]["label"].values())[0]
+
+    if not values or not years:
+        return None
+
+    index_by_year = {}
+    for i, year in enumerate(years):
+        if i < len(values) and values[i] is not None:
+            index_by_year[year] = values[i]
+
+    anchor_year = None
+    if vurderingsdato:
+        anchor_year = vurderingsdato[:4]
+    if not anchor_year or anchor_year not in index_by_year:
+        anchor_year = years[-1]
+
+    anchor_index = index_by_year.get(anchor_year)
+    if not anchor_index or anchor_index == 0:
+        return None
+
+    vurderinger = []
+    for year in years:
+        idx = index_by_year.get(year)
+        if idx is None:
+            continue
+        ratio = idx / anchor_index
+        entry = {"aar": year, "indeks": idx}
+        if current_ejendomsvaerdi is not None:
+            entry["ejendomsvaerdi_est"] = round(current_ejendomsvaerdi * ratio)
+        if current_grundvaerdi is not None:
+            entry["grundvaerdi_est"] = round(current_grundvaerdi * ratio)
+        vurderinger.append(entry)
+
+    return {
+        "kilde": "DST EJ67 prisindeks (estimat)",
+        "region": region_label,
+        "ejendomskategori": ejkat,
+        "anker_aar": anchor_year,
+        "vurderinger": vurderinger,
+    }
+
+
 def _solve_altcha(challenge_data: dict) -> str:
     """Solve the ALTCHA proof-of-work challenge and return a base64 token."""
     algorithm = challenge_data["algorithm"]
