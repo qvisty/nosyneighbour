@@ -203,6 +203,13 @@
     .stop-item:last-child { border-bottom: none; }
     .stop-name { color: #111; font-weight: 500; }
     .stop-dist { color: #6b7280; font-size: 11px; }
+    .dep-section { margin-top: 10px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+    .dep-section-title { font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    .dep-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid #f3f4f6; font-size: 11px; }
+    .dep-item:last-child { border-bottom: none; }
+    .dep-line { font-weight: 600; color: #2563eb; min-width: 60px; }
+    .dep-dir { flex: 1; color: #374151; margin: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dep-time { color: #111; font-weight: 500; white-space: nowrap; }
 
     /* ── Easements ── */
     .easement { font-size: 12px; color: #374151; padding: 3px 0; border-bottom: 1px solid #f3f4f6; }
@@ -649,8 +656,20 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
     }, 50);
   }
 
-  // Transport stops
+  // Transport stops and departures
   if (transport && transport.stops && transport.stops.length > 0) {
+    const depsHtml = (transport.departures && transport.departures.length > 0)
+      ? `<div class="dep-section">
+           <div class="dep-section-title">Næste afgange fra ${transport.stops[0].name}</div>
+           ${transport.departures.map(d => `
+             <div class="dep-item">
+               <span class="dep-line">${d.name}</span>
+               <span class="dep-dir">${d.direction}</span>
+               <span class="dep-time">${d.time}</span>
+             </div>
+           `).join('')}
+         </div>`
+      : '';
     container.appendChild(html(`
       <div class="card">
         <div class="card-title">Offentlig transport</div>
@@ -660,6 +679,7 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
             <span class="stop-dist">${s.distance} m</span>
           </div>
         `).join('')}
+        ${depsHtml}
       </div>
     `));
   }

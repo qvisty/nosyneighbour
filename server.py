@@ -186,7 +186,8 @@ def valuations(q: str = Query(...)):
     }
 
 
-REJSEPLANEN_NEARBY_URL = "http://xmlopen.rejseplanen.dk/bin/rest.exe/location.nearbystops"
+REJSEPLANEN_BASE_URL = "https://www.rejseplanen.dk/api"
+REJSEPLANEN_ACCESS_ID = os.environ.get("REJSEPLANEN_ACCESS_ID", "")
 DMI_CLIMATE_URL = "https://dmigw.govcloud.dk/v2/climateData/collections/municipalityValue/items"
 DMI_API_KEY = os.environ.get("DMI_API_KEY", "")
 
@@ -236,32 +237,63 @@ def climate(lat: float = Query(...), lng: float = Query(...)):
 
 @app.get("/api/transport")
 def transport(lat: float = Query(...), lng: float = Query(...), max_results: int = Query(8)):
-    """Return nearby public transport stops from Rejseplanen."""
-    resp = requests.get(REJSEPLANEN_NEARBY_URL, params={
-        "coordX": str(int(lng * 1_000_000)),
-        "coordY": str(int(lat * 1_000_000)),
+    """Return nearby public transport stops with departures from Rejseplanen API 2.0."""
+    if not REJSEPLANEN_ACCESS_ID:
+        raise HTTPException(status_code=503, detail="REJSEPLANEN_ACCESS_ID not configured")
+    # Nearby stops
+    resp = requests.get(f"{REJSEPLANEN_BASE_URL}/location.nearbystops", params={
+        "accessId": REJSEPLANEN_ACCESS_ID,
+        "originCoordLat": lat,
+        "originCoordLong": lng,
+        "r": 1000,
         "maxNo": max_results,
         "format": "json",
     }, timeout=10)
     if not resp.ok:
         raise HTTPException(status_code=502, detail="Rejseplanen API error")
     data = resp.json()
-    stops_raw = data.get("LocationList", {}).get("StopLocation", [])
-    if isinstance(stops_raw, dict):
-        stops_raw = [stops_raw]
+    if "errorCode" in data:
+        raise HTTPException(status_code=502, detail=data.get("errorText", "Rejseplanen error"))
+    stops_raw = data.get("stopLocationOrCoordLocation", [])
     stops = []
-    for s in stops_raw:
+    for item in stops_raw:
+        s = item.get("StopLocation", item)
         try:
             stops.append({
                 "name": s.get("name", ""),
-                "lat": int(s.get("y", 0)) / 1_000_000,
-                "lng": int(s.get("x", 0)) / 1_000_000,
-                "distance": int(s.get("distance", 0)),
-                "id": s.get("id", ""),
+                "lat": float(s.get("lat", 0)),
+                "lng": float(s.get("lon", 0)),
+                "distance": int(s.get("dist", s.get("distance", 0))),
+                "id": s.get("extId", s.get("id", "")),
             })
         except (ValueError, TypeError):
             continue
-    return {"stops": stops}
+    # Fetch departures for the nearest stop
+    departures = []
+    if stops:
+        nearest_id = stops[0]["id"]
+        try:
+            dep_resp = requests.get(f"{REJSEPLANEN_BASE_URL}/departureBoard", params={
+                "accessId": REJSEPLANEN_ACCESS_ID,
+                "id": nearest_id,
+                "duration": 60,
+                "maxJourneys": 8,
+                "format": "json",
+            }, timeout=10)
+            if dep_resp.ok:
+                dep_data = dep_resp.json()
+                for d in dep_data.get("Departure", []):
+                    departures.append({
+                        "name": d.get("name", "").strip(),
+                        "direction": d.get("direction", ""),
+                        "time": d.get("time", ""),
+                        "date": d.get("date", ""),
+                        "track": d.get("track", ""),
+                        "stop": d.get("stop", ""),
+                    })
+        except Exception:
+            pass
+    return {"stops": stops, "departures": departures}
 
 
 @app.get("/api/report")
