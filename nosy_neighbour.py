@@ -208,6 +208,168 @@ def fetch_price_trend(kommunekode: str, ejendomstype: str | None = None,
     }
 
 
+def fetch_dst_demographics(kommunekode: str) -> dict | None:
+    """Fetch population and income statistics from DST for a municipality.
+
+    Uses FOLK1A (population by age group) and INDKP101 (income averages).
+    Returns a dict with population breakdown and income summary, or None on failure.
+    """
+    try:
+        pop = _fetch_dst_population(kommunekode)
+        income = _fetch_dst_income(kommunekode)
+    except Exception:
+        return None
+
+    if not pop and not income:
+        return None
+
+    result = {}
+    if pop:
+        result["befolkning"] = pop
+    if income:
+        result["indkomst"] = income
+    return result
+
+
+def _fetch_dst_population(kommunekode: str) -> dict | None:
+    """Fetch population counts from DST FOLK1A for a municipality.
+
+    Returns age-group breakdown and total population.
+    """
+    age_groups = {
+        "0-17": [str(a) for a in range(0, 18)],
+        "18-29": [str(a) for a in range(18, 30)],
+        "30-49": [str(a) for a in range(30, 50)],
+        "50-64": [str(a) for a in range(50, 65)],
+        "65+": [str(a) for a in range(65, 126)],
+    }
+    all_ages = []
+    for ages in age_groups.values():
+        all_ages.extend(ages)
+
+    resp = requests.post(DST_API_URL, json={
+        "table": "FOLK1A",
+        "format": "JSONSTAT",
+        "lang": "da",
+        "variables": [
+            {"code": "OMRÅDE", "values": [kommunekode, "000"]},
+            {"code": "KØN", "values": ["TOT"]},
+            {"code": "ALDER", "values": all_ages},
+            {"code": "CIVILSTAND", "values": ["TOT"]},
+            {"code": "Tid", "values": ["*"]},
+        ],
+    }, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    values = data["dataset"]["value"]
+
+    dims = data["dataset"]["dimension"]
+    tid_labels = list(dims["Tid"]["category"]["label"].values())
+    tid_ids = list(dims["Tid"]["category"]["index"].keys())
+    n_ages = len(all_ages)
+    n_tid = len(tid_ids)
+
+    latest_t = n_tid - 1
+    result_groups = {}
+    totals = {"kommune": 0, "land": 0}
+
+    age_idx = 0
+    for group_name, ages in age_groups.items():
+        kommune_sum = 0
+        land_sum = 0
+        for i, _ in enumerate(ages):
+            a = age_idx + i
+            k_idx = 0 * (n_ages * n_tid) + a * n_tid + latest_t
+            l_idx = 1 * (n_ages * n_tid) + a * n_tid + latest_t
+            k_val = values[k_idx] if k_idx < len(values) else 0
+            l_val = values[l_idx] if l_idx < len(values) else 0
+            kommune_sum += (k_val or 0)
+            land_sum += (l_val or 0)
+        result_groups[group_name] = {"kommune": kommune_sum, "land": land_sum}
+        totals["kommune"] += kommune_sum
+        totals["land"] += land_sum
+        age_idx += len(ages)
+
+    if totals["kommune"] == 0:
+        return None
+
+    groups = []
+    for group_name, counts in result_groups.items():
+        groups.append({
+            "gruppe": group_name,
+            "antal": counts["kommune"],
+            "pct": round(counts["kommune"] / totals["kommune"] * 100, 1),
+            "pct_land": round(counts["land"] / totals["land"] * 100, 1) if totals["land"] else None,
+        })
+
+    return {
+        "total": totals["kommune"],
+        "total_land": totals["land"],
+        "kvartal": tid_labels[-1] if tid_labels else None,
+        "aldersgrupper": groups,
+    }
+
+
+def _fetch_dst_income(kommunekode: str) -> dict | None:
+    """Fetch average income stats from DST INDKP101 for a municipality."""
+    income_codes = {
+        "100": "disponibel_indkomst",
+        "110": "erhvervsindkomst",
+        "130": "offentlige_overfoersler",
+    }
+    income_labels = {
+        "disponibel_indkomst": "Disponibel indkomst",
+        "erhvervsindkomst": "Erhvervsindkomst",
+        "offentlige_overfoersler": "Offentlige overførsler",
+    }
+
+    resp = requests.post(DST_API_URL, json={
+        "table": "INDKP101",
+        "format": "JSONSTAT",
+        "lang": "da",
+        "variables": [
+            {"code": "OMRÅDE", "values": [kommunekode, "000"]},
+            {"code": "ENHED", "values": ["116"]},
+            {"code": "KOEN", "values": ["MOK"]},
+            {"code": "INDKOMSTTYPE", "values": list(income_codes.keys())},
+            {"code": "Tid", "values": ["*"]},
+        ],
+    }, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    values = data["dataset"]["value"]
+
+    dims = data["dataset"]["dimension"]
+    tid_ids = list(dims["Tid"]["category"]["index"].keys())
+    n_tid = len(tid_ids)
+    n_types = len(income_codes)
+    latest_t = n_tid - 1
+
+    items = []
+    code_list = list(income_codes.keys())
+    for type_idx, code in enumerate(code_list):
+        key = income_codes[code]
+        k_idx = 0 * (n_types * n_tid) + type_idx * n_tid + latest_t
+        l_idx = 1 * (n_types * n_tid) + type_idx * n_tid + latest_t
+        k_val = values[k_idx] if k_idx < len(values) else None
+        l_val = values[l_idx] if l_idx < len(values) else None
+        if k_val is not None:
+            items.append({
+                "type": key,
+                "label": income_labels[key],
+                "kommune_kr": k_val,
+                "land_kr": l_val,
+            })
+
+    if not items:
+        return None
+
+    return {
+        "aar": tid_ids[-1] if tid_ids else None,
+        "poster": items,
+    }
+
+
 def _solve_altcha(challenge_data: dict) -> str:
     """Solve the ALTCHA proof-of-work challenge and return a base64 token."""
     algorithm = challenge_data["algorithm"]

@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 import uvicorn
 from weasyprint import HTML
 
-from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend
+from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics
 
 DAWA_REVERSE_URL = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
 
@@ -290,6 +290,20 @@ def report(q: str = Query(...)):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/neighbourhood")
+def neighbourhood(kommune: str = Query(..., description="Municipality name from vurdering")):
+    """Return socioeconomic profile for a municipality from DST."""
+    kode = kommune_kode(kommune)
+    if not kode:
+        raise HTTPException(status_code=404, detail=f"Unknown municipality: {kommune}")
+    data = fetch_dst_demographics(kode)
+    if data is None:
+        raise HTTPException(status_code=502, detail="Could not fetch DST data")
+    data["kommune"] = kommune
+    data["kommunekode"] = kode
+    return data
 
 
 @app.get("/", response_class=HTMLResponse)

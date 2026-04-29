@@ -230,6 +230,25 @@
       box-shadow: 0 1px 4px rgba(0,0,0,.4);
     }
 
+    /* ── Neighbourhood stats ── */
+    .nabo-bar-wrap { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+    .nabo-bar-label { width: 42px; font-size: 11px; color: #6b7280; text-align: right; flex-shrink: 0; }
+    .nabo-bar-track { flex: 1; height: 14px; background: #f3f4f6; border-radius: 3px; position: relative; overflow: hidden; }
+    .nabo-bar-fill { height: 100%; border-radius: 3px; }
+    .nabo-bar-fill.kommune { background: #2563eb; }
+    .nabo-bar-fill.land { background: #e5e7eb; position: absolute; top: 0; left: 0; height: 100%; }
+    .nabo-bar-pct { width: 38px; font-size: 11px; color: #374151; font-weight: 500; }
+    .nabo-legend { display: flex; gap: 12px; font-size: 11px; color: #6b7280; margin-top: 6px; }
+    .nabo-legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
+    .nabo-loading { font-size: 12px; color: #6b7280; padding: 8px 0; }
+    .nabo-income-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #f3f4f6; }
+    .nabo-income-row:last-child { border-bottom: none; }
+    .nabo-income-label { color: #6b7280; font-size: 12px; }
+    .nabo-income-vals { font-size: 12px; font-weight: 500; }
+    .nabo-income-diff { font-size: 11px; margin-left: 4px; }
+    .nabo-income-diff.pos { color: #166534; }
+    .nabo-income-diff.neg { color: #dc2626; }
+
     /* ── Leaflet popup ── */
     .leaflet-popup-content { min-width: 180px; font-size: 13px; }
     .popup-address { font-weight: 700; margin-bottom: 6px; }
@@ -672,6 +691,18 @@ function renderEntryCards(container, d, valuations, transport, climate, entryIdx
       `));
     }
   }
+
+  // Neighbourhood statistics (async — loads after initial render)
+  if (d.vurdering?.kommune) {
+    const naboCard = html(`
+      <div class="card">
+        <div class="card-title">Nabostatistik — ${d.vurdering.kommune}</div>
+        <div class="nabo-loading">Henter DST-data…</div>
+      </div>
+    `);
+    container.appendChild(naboCard);
+    fetchNeighbourhoodData(d.vurdering.kommune, naboCard);
+  }
 }
 
 function renderMortgage(h) {
@@ -748,6 +779,71 @@ function html(str) {
   const t = document.createElement('template');
   t.innerHTML = str.trim();
   return t.content.firstChild;
+}
+
+// ── Neighbourhood stats ─────────────────────────────────────────────────────
+const _naboCache = {};
+
+async function fetchNeighbourhoodData(kommune, cardEl) {
+  if (_naboCache[kommune]) {
+    renderNeighbourhoodCard(_naboCache[kommune], cardEl);
+    return;
+  }
+  try {
+    const res = await fetch(`/api/neighbourhood?kommune=${encodeURIComponent(kommune)}`);
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    _naboCache[kommune] = data;
+    renderNeighbourhoodCard(data, cardEl);
+  } catch {
+    cardEl.querySelector('.nabo-loading').textContent = 'Kunne ikke hente nabostatistik.';
+  }
+}
+
+function renderNeighbourhoodCard(data, cardEl) {
+  const loading = cardEl.querySelector('.nabo-loading');
+  if (loading) loading.remove();
+
+  let content = '';
+
+  if (data.befolkning) {
+    const bef = data.befolkning;
+    content += `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Befolkning: ${fmt(bef.total)} (${bef.kvartal})</div>`;
+    for (const g of bef.aldersgrupper) {
+      content += `
+        <div class="nabo-bar-wrap">
+          <span class="nabo-bar-label">${g.gruppe}</span>
+          <div class="nabo-bar-track">
+            <div class="nabo-bar-fill land" style="width:${g.pct_land}%"></div>
+            <div class="nabo-bar-fill kommune" style="width:${g.pct}%"></div>
+          </div>
+          <span class="nabo-bar-pct">${g.pct}%</span>
+        </div>`;
+    }
+    content += `<div class="nabo-legend">
+      <span><span class="nabo-legend-dot" style="background:#2563eb"></span>Kommune</span>
+      <span><span class="nabo-legend-dot" style="background:#e5e7eb"></span>Hele landet</span>
+    </div></div>`;
+  }
+
+  if (data.indkomst) {
+    const ink = data.indkomst;
+    content += `<div><div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Indkomst pr. person (${ink.aar})</div>`;
+    for (const p of ink.poster) {
+      const diff = p.land_kr ? p.kommune_kr - p.land_kr : null;
+      const diffCls = diff > 0 ? 'pos' : diff < 0 ? 'neg' : '';
+      const diffStr = diff !== null ? `<span class="nabo-income-diff ${diffCls}">${diff > 0 ? '+' : ''}${fmt(Math.round(diff))} kr.</span>` : '';
+      content += `
+        <div class="nabo-income-row">
+          <span class="nabo-income-label">${p.label}</span>
+          <span class="nabo-income-vals">${fmt(Math.round(p.kommune_kr))} kr.${diffStr}</span>
+        </div>`;
+    }
+    content += `<div class="nabo-legend" style="margin-top:4px">Difference = kommune vs. landsgennemsnit</div></div>`;
+  }
+
+  const wrapper = html(`<div>${content}</div>`);
+  cardEl.appendChild(wrapper);
 }
 </script>
 </body>
