@@ -117,6 +117,12 @@
 <div class="subtitle">{{ data.ejendomstype }}</div>
 <div class="generated">Rapport genereret {{ generated_at }}</div>
 
+{% if map_base64 %}
+<div class="map-container">
+  <img src="data:image/png;base64,{{ map_base64 }}" alt="Kort over ejendommen" style="width:100%; border-radius:6px; border:1px solid #e5e7eb;">
+</div>
+{% endif %}
+
 {% if data.matrikler %}
 <h2>Matrikler</h2>
 <table>
@@ -177,6 +183,56 @@
 {% for s in data.servitutter %}
 <div class="easement">[{{ s.prioritet }}] {{ s.tekst }}</div>
 {% endfor %}
+{% endif %}
+
+{% if price_trend and price_trend.vurderinger %}
+<h2>Prisudvikling ({{ price_trend.region }})</h2>
+<p style="font-size:10px; color:#6b7280; margin-bottom:8px;">Kilde: {{ price_trend.kilde }}</p>
+<table>
+  <tr><th>&Aring;r</th><th>Ejendomsv&aelig;rdi (est.)</th><th>Grundv&aelig;rdi (est.)</th></tr>
+  {% for v in price_trend.vurderinger[-8:] %}
+  <tr>
+    <td>{{ v.aar }}</td>
+    <td>{% if v.ejendomsvaerdi_est %}{{ "{:,}".format(v.ejendomsvaerdi_est).replace(",", ".") }} kr.{% else %}-{% endif %}</td>
+    <td>{% if v.grundvaerdi_est %}{{ "{:,}".format(v.grundvaerdi_est).replace(",", ".") }} kr.{% else %}-{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if demographics %}
+{% if demographics.befolkning %}
+<h2>Befolkning i {{ data.vurdering.kommune }}</h2>
+<table>
+  <tr><th>Aldersgruppe</th><th>Antal</th><th>Andel kommune</th><th>Andel landsplan</th></tr>
+  {% for ag in demographics.befolkning.aldersgrupper %}
+  <tr>
+    <td>{{ ag.gruppe }}</td>
+    <td>{{ "{:,}".format(ag.antal).replace(",", ".") }}</td>
+    <td>{{ ag.pct }}%</td>
+    <td>{{ ag.pct_land }}%</td>
+  </tr>
+  {% endfor %}
+  <tr style="font-weight:700;">
+    <td>I alt</td>
+    <td>{{ "{:,}".format(demographics.befolkning.total).replace(",", ".") }}</td>
+    <td colspan="2"></td>
+  </tr>
+</table>
+{% endif %}
+{% if demographics.indkomst %}
+<h2>Indkomst ({{ demographics.indkomst.aar }})</h2>
+<table>
+  <tr><th>M&aring;l</th><th>Kommune</th><th>Hele landet</th></tr>
+  {% for item in demographics.indkomst.poster %}
+  <tr>
+    <td>{{ item.label }}</td>
+    <td>{{ "{:,}".format(item.kommune_kr).replace(",", ".") }} kr.</td>
+    <td>{{ "{:,}".format(item.land_kr).replace(",", ".") }} kr.</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
 {% endif %}
 
 <div class="footer">

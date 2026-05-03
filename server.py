@@ -296,6 +296,50 @@ def transport(lat: float = Query(...), lng: float = Query(...), max_results: int
     return {"stops": stops, "departures": departures}
 
 
+DATAFORSYNINGEN_TOKEN = os.environ.get("DATAFORSYNINGEN_TOKEN", "")
+
+
+def _fetch_static_map(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
+    """Fetch a static map image as base64 PNG from Dataforsyningen WMS."""
+    import base64 as b64
+    import math
+
+    # Convert lat/lng to EPSG:3857 (Web Mercator) for WMS bbox
+    x = lng * 20037508.34 / 180.0
+    y_rad = math.log(math.tan((90 + lat) * math.pi / 360.0))
+    y = y_rad * 20037508.34 / math.pi
+
+    # ~250m view around the point
+    dx = 400
+    dy = dx * height / width
+    bbox = f"{x - dx},{y - dy},{x + dx},{y + dy}"
+
+    token = DATAFORSYNINGEN_TOKEN
+    if not token:
+        return None
+
+    url = "https://api.dataforsyningen.dk/orto_foraar_DAF"
+    params = {
+        "service": "WMS",
+        "version": "1.1.1",
+        "request": "GetMap",
+        "layers": "orto_foraar",
+        "srs": "EPSG:3857",
+        "bbox": bbox,
+        "width": width,
+        "height": height,
+        "format": "image/png",
+        "token": token,
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.ok and resp.headers.get("content-type", "").startswith("image"):
+            return b64.b64encode(resp.content).decode()
+    except Exception:
+        pass
+    return None
+
+
 @app.get("/api/report")
 def report(q: str = Query(...)):
     try:
@@ -307,9 +351,48 @@ def report(q: str = Query(...)):
         raise HTTPException(status_code=404, detail="No property data found")
     data = _annotate_loan_types(tingbog)
 
+    # Resolve coordinates for map
+    map_base64 = None
+    try:
+        auto_results = _client.autocomplete_address(q)
+        if auto_results:
+            addr_data = auto_results[0].get("data", {})
+            lat = addr_data.get("y")
+            lng = addr_data.get("x")
+            if lat and lng:
+                map_base64 = _fetch_static_map(float(lat), float(lng))
+    except Exception:
+        pass
+
+    # Fetch neighbourhood statistics
+    demographics = None
+    price_trend = None
+    vurdering = data.get("vurdering") or {}
+    kommune = vurdering.get("kommune", "")
+    if kommune:
+        kode = kommune_kode(kommune)
+        if kode:
+            try:
+                demographics = fetch_dst_demographics(kode)
+            except Exception:
+                pass
+            try:
+                price_trend = fetch_price_trend(
+                    kommunekode=kode,
+                    ejendomstype=data.get("ejendomstype"),
+                    current_ejendomsvaerdi=vurdering.get("ejendomsvaerdi"),
+                    current_grundvaerdi=vurdering.get("grundvaerdi"),
+                    vurderingsdato=vurdering.get("vurderingsdato"),
+                )
+            except Exception:
+                pass
+
     template = _jinja_env.get_template("report.html")
     html_content = template.render(
         data=data,
+        map_base64=map_base64,
+        demographics=demographics,
+        price_trend=price_trend,
         generated_at=datetime.now().strftime("%d-%m-%Y %H:%M"),
     )
     pdf_bytes = HTML(string=html_content).write_pdf()
