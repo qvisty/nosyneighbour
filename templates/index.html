@@ -256,6 +256,56 @@
     .nabo-income-diff.pos { color: #166534; }
     .nabo-income-diff.neg { color: #dc2626; }
 
+    /* ── Layer panel ── */
+    #layer-panel {
+      border-top: 1px solid #eee;
+      padding: 10px 14px;
+      flex-shrink: 0;
+    }
+    #layer-toggle-btn {
+      width: 100%;
+      padding: 8px 12px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      text-align: left;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #layer-toggle-btn:hover { background: #f3f4f6; }
+    #layer-list {
+      display: none;
+      margin-top: 8px;
+    }
+    #layer-list.open { display: block; }
+    .layer-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 12px;
+    }
+    .layer-item:last-child { border-bottom: none; }
+    .layer-item input[type="checkbox"] { margin: 0; cursor: pointer; }
+    .layer-item label { cursor: pointer; flex: 1; color: #374151; }
+    .layer-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .layer-note {
+      font-size: 10px;
+      color: #9ca3af;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
     /* ── Leaflet popup ── */
     .leaflet-popup-content { min-width: 180px; font-size: 13px; }
     .popup-address { font-weight: 700; margin-bottom: 6px; }
@@ -275,6 +325,39 @@
       Søg på en adresse eller klik på kortet.<br>Op til 10 adresser ad gangen.
     </div>
   </div>
+  <div id="layer-panel">
+    <button id="layer-toggle-btn" onclick="toggleLayerPanel()">
+      Kortlag <span id="layer-arrow">▸</span>
+    </button>
+    <div id="layer-list">
+      <div class="layer-item">
+        <input type="checkbox" id="layer-stoej" onchange="toggleLayer('stoej', this.checked)">
+        <span class="layer-dot" style="background:#dc2626"></span>
+        <label for="layer-stoej">Støjzoner (veje)</label>
+      </div>
+      <div class="layer-item">
+        <input type="checkbox" id="layer-flood" onchange="toggleLayer('flood', this.checked)">
+        <span class="layer-dot" style="background:#2563eb"></span>
+        <label for="layer-flood">Oversvømmelsesrisiko</label>
+      </div>
+      <div class="layer-item">
+        <input type="checkbox" id="layer-fredskov" onchange="toggleLayer('fredskov', this.checked)">
+        <span class="layer-dot" style="background:#16a34a"></span>
+        <label for="layer-fredskov">Fredskov</label>
+      </div>
+      <div class="layer-item">
+        <input type="checkbox" id="layer-natur" onchange="toggleLayer('natur', this.checked)">
+        <span class="layer-dot" style="background:#65a30d"></span>
+        <label for="layer-natur">Beskyttet natur (§3)</label>
+      </div>
+      <div class="layer-item">
+        <input type="checkbox" id="layer-lokalplan" onchange="toggleLayer('lokalplan', this.checked)">
+        <span class="layer-dot" style="background:#9333ea"></span>
+        <label for="layer-lokalplan">Lokalplaner (vedtagne)</label>
+      </div>
+      <div class="layer-note">Kilder: Vejdirektoratet, MiljøGIS, Plandata.dk</div>
+    </div>
+  </div>
 </div>
 
 <div id="map"></div>
@@ -288,6 +371,65 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
   maxZoom: 19,
 }).addTo(map);
+
+// ── WMS overlay layers ────────────────────────────────────────────────────
+const wmsLayers = {
+  stoej: L.tileLayer.wms('https://vmgeoserver.vd.dk/geoserver/VD/ows', {
+    layers: 'stoejkort',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.1',
+    opacity: 0.55,
+    attribution: 'Vejdirektoratet',
+  }),
+  flood: L.tileLayer.wms('https://miljoegis.mim.dk/wms?servicename=miljoegis-klimatilpasningsplaner_wms', {
+    layers: 'theme-klimatilp-vektor-hojvandshaendelse2050middel100aars',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.1',
+    opacity: 0.55,
+    attribution: 'MiljøGIS / Kystdirektoratet',
+  }),
+  fredskov: L.tileLayer.wms('https://miljoegis.mim.dk/wms?servicename=miljoegis-mst_wms', {
+    layers: 'theme-skov_fredskov_ba2014',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.1',
+    opacity: 0.55,
+    attribution: 'MiljøGIS / Miljøstyrelsen',
+  }),
+  natur: L.tileLayer.wms('https://miljoegis.mim.dk/wms?servicename=miljoegis-mst_wms', {
+    layers: 'theme-ais_bes_naturtyper',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.1',
+    opacity: 0.55,
+    attribution: 'MiljøGIS / Miljøstyrelsen',
+  }),
+  lokalplan: L.tileLayer.wms('https://geoserver.plandata.dk/geoserver/wms', {
+    layers: 'pdk:theme_pdk_lokalplan_vedtaget',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.1',
+    opacity: 0.45,
+    attribution: 'Plandata.dk',
+  }),
+};
+
+function toggleLayerPanel() {
+  const list = document.getElementById('layer-list');
+  const arrow = document.getElementById('layer-arrow');
+  list.classList.toggle('open');
+  arrow.textContent = list.classList.contains('open') ? '▾' : '▸';
+}
+
+function toggleLayer(key, on) {
+  if (on) {
+    wmsLayers[key].addTo(map);
+  } else {
+    map.removeLayer(wmsLayers[key]);
+  }
+}
 
 // entries: [{ label, lat, lng, data, error, loading, marker }]
 const entries = [];
@@ -860,6 +1002,23 @@ function renderNeighbourhoodCard(data, cardEl) {
         </div>`;
     }
     content += `<div class="nabo-legend" style="margin-top:4px">Difference = kommune vs. landsgennemsnit</div></div>`;
+  }
+
+  if (data.arbejdsloeshed) {
+    const arb = data.arbejdsloeshed;
+    const diff = arb.land_pct != null ? arb.kommune_pct - arb.land_pct : null;
+    const diffCls = diff > 0 ? 'neg' : diff < 0 ? 'pos' : '';
+    const diffStr = diff !== null ? `<span class="nabo-income-diff ${diffCls}">${diff > 0 ? '+' : ''}${diff.toFixed(1)} pp.</span>` : '';
+    content += `<div style="margin-top:10px"><div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Arbejdsløshed (${arb.aar})</div>`;
+    content += `
+      <div class="nabo-income-row">
+        <span class="nabo-income-label">Ledige i pct. af arbejdsstyrken</span>
+        <span class="nabo-income-vals">${arb.kommune_pct.toFixed(1)}%${diffStr}</span>
+      </div>`;
+    if (arb.land_pct != null) {
+      content += `<div class="nabo-legend" style="margin-top:4px">Landsgennemsnit: ${arb.land_pct.toFixed(1)}%</div>`;
+    }
+    content += `</div>`;
   }
 
   const wrapper = html(`<div>${content}</div>`);
