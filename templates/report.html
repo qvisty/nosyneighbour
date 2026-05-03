@@ -123,6 +123,22 @@
 </div>
 {% endif %}
 
+{% if bbr_data and bbr_data.bygninger %}
+<h2>Bygningsdata (BBR)</h2>
+<table>
+  <tr><th>Bygning</th><th>Bygge&aring;r</th><th>Etager</th><th>Enheder</th><th>Elevator</th></tr>
+  {% for b in bbr_data.bygninger %}
+  <tr>
+    <td>{{ b.anvendelse or ('Bygning ' ~ b.bygningsnr) }}</td>
+    <td>{{ b.byggeaar or '&ndash;' }}</td>
+    <td>{{ b.antal_etager or '&ndash;' }}</td>
+    <td>{{ b.antal_enheder or '&ndash;' }}</td>
+    <td>{{ 'Ja' if b.har_elevator else 'Nej' }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 {% if data.matrikler %}
 <h2>Matrikler</h2>
 <table>
@@ -231,6 +247,17 @@
     <td>{{ "{:,}".format(item.land_kr).replace(",", ".") }} kr.</td>
   </tr>
   {% endfor %}
+</table>
+{% endif %}
+{% if demographics.arbejdsloeshed %}
+<h2>Arbejdsl&oslash;shed ({{ demographics.arbejdsloeshed.aar }})</h2>
+<table>
+  <tr><th>M&aring;l</th><th>Kommune</th><th>Hele landet</th></tr>
+  <tr>
+    <td>Ledige i pct. af arbejdsstyrken</td>
+    <td>{{ "%.1f"|format(demographics.arbejdsloeshed.kommune_pct) }}%</td>
+    <td>{% if demographics.arbejdsloeshed.land_pct is not none %}{{ "%.1f"|format(demographics.arbejdsloeshed.land_pct) }}%{% else %}&ndash;{% endif %}</td>
+  </tr>
 </table>
 {% endif %}
 {% endif %}

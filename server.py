@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 import uvicorn
 from weasyprint import HTML
 
-from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics
+from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics, fetch_bbr_data
 
 DAWA_REVERSE_URL = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
 
@@ -90,6 +90,7 @@ def autocomplete(q: str = Query(...)):
             "husnr": d["husnr"],
             "lat": d["y"],
             "lng": d["x"],
+            "adgangsadresse_id": d.get("id"),
         }
         for r in results
         if (d := r.get("data", {})) and d.get("postnr") and d.get("vejnavn") and d.get("husnr")
@@ -110,6 +111,7 @@ def reverse(lat: float = Query(...), lng: float = Query(...)):
         "husnr": d["husnr"],
         "lat": d["adgangspunkt"]["koordinater"][1],
         "lng": d["adgangspunkt"]["koordinater"][0],
+        "adgangsadresse_id": d.get("id"),
     }
 
 
@@ -351,8 +353,9 @@ def report(q: str = Query(...)):
         raise HTTPException(status_code=404, detail="No property data found")
     data = _annotate_loan_types(tingbog)
 
-    # Resolve coordinates for map
+    # Resolve coordinates for map and get adgangsadresse_id for BBR
     map_base64 = None
+    bbr_data = None
     try:
         auto_results = _client.autocomplete_address(q)
         if auto_results:
@@ -361,6 +364,9 @@ def report(q: str = Query(...)):
             lng = addr_data.get("x")
             if lat and lng:
                 map_base64 = _fetch_static_map(float(lat), float(lng))
+            adgangsadresse_id = addr_data.get("id")
+            if adgangsadresse_id:
+                bbr_data = fetch_bbr_data(adgangsadresse_id)
     except Exception:
         pass
 
@@ -391,6 +397,7 @@ def report(q: str = Query(...)):
     html_content = template.render(
         data=data,
         map_base64=map_base64,
+        bbr_data=bbr_data,
         demographics=demographics,
         price_trend=price_trend,
         generated_at=datetime.now().strftime("%d-%m-%Y %H:%M"),
@@ -418,6 +425,25 @@ def neighbourhood(kommune: str = Query(..., description="Municipality name from 
         raise HTTPException(status_code=502, detail="Could not fetch DST data")
     data["kommune"] = kommune
     data["kommunekode"] = kode
+    return data
+
+
+@app.get("/api/bbr")
+def bbr(q: str = Query(...)):
+    """Return BBR building data for an address."""
+    try:
+        results = _client.autocomplete_address(q)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not resolve address")
+    if not results:
+        raise HTTPException(status_code=404, detail="Address not found")
+    addr_data = results[0].get("data", {})
+    adgangsadresse_id = addr_data.get("id")
+    if not adgangsadresse_id:
+        raise HTTPException(status_code=404, detail="No adgangsadresse id found")
+    data = fetch_bbr_data(adgangsadresse_id)
+    if data is None:
+        raise HTTPException(status_code=502, detail="Could not fetch BBR data")
     return data
 
 

@@ -12,6 +12,7 @@ when an ISIN is provided (via ESMA FIRDS).
 import base64
 import hashlib
 import json
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -22,6 +23,7 @@ BASE_URL = "https://www.tinglysning.dk/tinglysning/unsecrest"
 DAWA_URL = "https://dawa.aws.dk/autocomplete"
 DST_API_URL = "https://api.statbank.dk/v1/data"
 FIRDS_URL = "https://registers.esma.europa.eu/solr/esma_registers_firds/select"
+GRUNDDATA_BBR_URL = "https://grunddata.filarkiv.dk/v1/bbr/bygninger"
 
 # Maps DST RENTFIX codes to human-readable loan type names
 RENTFIX_LOAN_TYPES = {
@@ -209,18 +211,20 @@ def fetch_price_trend(kommunekode: str, ejendomstype: str | None = None,
 
 
 def fetch_dst_demographics(kommunekode: str) -> dict | None:
-    """Fetch population and income statistics from DST for a municipality.
+    """Fetch population, income and unemployment statistics from DST for a municipality.
 
-    Uses FOLK1A (population by age group) and INDKP101 (income averages).
-    Returns a dict with population breakdown and income summary, or None on failure.
+    Uses FOLK1A (population by age group), INDKP101 (income averages),
+    and AULP01 (unemployment rate as % of workforce).
+    Returns a dict with population breakdown, income summary, and unemployment, or None on failure.
     """
     try:
         pop = _fetch_dst_population(kommunekode)
         income = _fetch_dst_income(kommunekode)
+        unemployment = _fetch_dst_unemployment(kommunekode)
     except Exception:
         return None
 
-    if not pop and not income:
+    if not pop and not income and not unemployment:
         return None
 
     result = {}
@@ -228,7 +232,53 @@ def fetch_dst_demographics(kommunekode: str) -> dict | None:
         result["befolkning"] = pop
     if income:
         result["indkomst"] = income
+    if unemployment:
+        result["arbejdsloeshed"] = unemployment
     return result
+
+
+def fetch_bbr_data(adgangsadresse_id: str) -> dict | None:
+    """Fetch building data from BBR via grunddata.filarkiv.dk.
+
+    Uses the adgangsadresse UUID to look up buildings at the address.
+    Returns a dict with byggeaar, anvendelse, etager, and enheder for each building.
+    """
+    try:
+        resp = requests.get(GRUNDDATA_BBR_URL, params={
+            "adgangsadresseid": adgangsadresse_id,
+        }, timeout=15)
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception:
+        return None
+
+    if not raw:
+        return None
+
+    bygninger = []
+    for b in raw:
+        anvendelse = b.get("BygningAnvendelseKode") or {}
+        bygning = {
+            "bygning_id": b.get("BygningId"),
+            "bygningsnr": (b.get("BygningsNr") or "").strip(),
+            "anvendelse_kode": anvendelse.get("Kode"),
+            "anvendelse": anvendelse.get("Tekst"),
+            "byggeaar": b.get("OpfoerelseAar"),
+            "antal_etager": len(b.get("Etager") or []),
+            "har_elevator": any(
+                o.get("HarElevator") for o in (b.get("Opgange") or [])
+            ),
+            "antal_enheder": len(b.get("Enheder") or []),
+        }
+        bygninger.append(bygning)
+
+    # Sort so primary building (lowest BygningsNr) comes first
+    bygninger.sort(key=lambda x: x.get("bygningsnr", ""))
+
+    return {
+        "kilde": "BBR via grunddata.filarkiv.dk",
+        "bygninger": bygninger,
+    }
 
 
 def _fetch_dst_population(kommunekode: str) -> dict | None:
@@ -367,6 +417,48 @@ def _fetch_dst_income(kommunekode: str) -> dict | None:
     return {
         "aar": tid_ids[-1] if tid_ids else None,
         "poster": items,
+    }
+
+
+def _fetch_dst_unemployment(kommunekode: str) -> dict | None:
+    """Fetch unemployment rate from DST AULP01 for a municipality.
+
+    Returns unemployment percentage of workforce for kommune vs national.
+    """
+    resp = requests.post(DST_API_URL, json={
+        "table": "AULP01",
+        "format": "JSONSTAT",
+        "lang": "da",
+        "variables": [
+            {"code": "OMRÅDE", "values": [kommunekode, "000"]},
+            {"code": "ALDER", "values": ["TOT"]},
+            {"code": "KØN", "values": ["TOT"]},
+            {"code": "Tid", "values": ["*"]},
+        ],
+    }, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    values = data["dataset"]["value"]
+
+    dims = data["dataset"]["dimension"]
+    tid_ids = list(dims["Tid"]["category"]["index"].keys())
+    n_tid = len(tid_ids)
+    latest_t = n_tid - 1
+
+    # Layout: OMRÅDE(2) x ALDER(1) x KØN(1) x Tid(n)
+    k_idx = 0 * n_tid + latest_t  # kommune
+    l_idx = 1 * n_tid + latest_t  # national
+
+    k_val = values[k_idx] if k_idx < len(values) else None
+    l_val = values[l_idx] if l_idx < len(values) else None
+
+    if k_val is None:
+        return None
+
+    return {
+        "aar": tid_ids[-1] if tid_ids else None,
+        "kommune_pct": k_val,
+        "land_pct": l_val,
     }
 
 
