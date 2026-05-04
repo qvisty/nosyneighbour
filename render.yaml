@@ -10,3 +10,7 @@ services:
       # Add any API keys here - never commit real values, use Render dashboard instead
       # - key: MY_API_KEY
       #   sync: false
+      - key: DATAFORDELER_USERNAME
+        sync: false
+      - key: DATAFORDELER_PASSWORD
+        sync: false
