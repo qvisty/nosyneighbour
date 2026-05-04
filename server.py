@@ -21,6 +21,7 @@ from weasyprint import HTML
 from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics, fetch_bbr_data
 
 DAWA_REVERSE_URL = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
+DATAFORSYNINGEN_TOKEN = os.environ.get("DATAFORSYNINGEN_TOKEN", "")
 
 _templates_dir = Path(__file__).parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(str(_templates_dir)), autoescape=True)
@@ -298,27 +299,42 @@ def transport(lat: float = Query(...), lng: float = Query(...), max_results: int
     return {"stops": stops, "departures": departures}
 
 
-DATAFORSYNINGEN_TOKEN = os.environ.get("DATAFORSYNINGEN_TOKEN", "")
-
-
-def _fetch_static_map(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
-    """Fetch a static map image as base64 PNG from Dataforsyningen WMS."""
+def _fetch_aerial_photo(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
+    """Fetch an aerial photo from Dataforsyningen WMS (requires DATAFORSYNINGEN_TOKEN)."""
     import base64 as b64
     import math
 
-    # Convert lat/lng to EPSG:3857 (Web Mercator) for WMS bbox
-    x = lng * 20037508.34 / 180.0
-    y_rad = math.log(math.tan((90 + lat) * math.pi / 360.0))
-    y = y_rad * 20037508.34 / math.pi
-
-    # ~250m view around the point
-    dx = 400
-    dy = dx * height / width
-    bbox = f"{x - dx},{y - dy},{x + dx},{y + dy}"
-
-    token = DATAFORSYNINGEN_TOKEN
-    if not token:
+    if not DATAFORSYNINGEN_TOKEN:
         return None
+
+    # Convert WGS84 lat/lng to EPSG:25832 (UTM zone 32N) used by Danish services
+    lat_rad = math.radians(lat)
+    lng_rad = math.radians(lng)
+    # UTM zone 32N central meridian = 9°E
+    lng0 = math.radians(9.0)
+    k0 = 0.9996
+    a = 6378137.0
+    f = 1 / 298.257223563
+    e = math.sqrt(2 * f - f * f)
+    e2 = e * e
+    ep2 = e2 / (1 - e2)
+    N = a / math.sqrt(1 - e2 * math.sin(lat_rad) ** 2)
+    T = math.tan(lat_rad) ** 2
+    C = ep2 * math.cos(lat_rad) ** 2
+    A = math.cos(lat_rad) * (lng_rad - lng0)
+    M = a * (
+        (1 - e2 / 4 - 3 * e2**2 / 64 - 5 * e2**3 / 256) * lat_rad
+        - (3 * e2 / 8 + 3 * e2**2 / 32 + 45 * e2**3 / 1024) * math.sin(2 * lat_rad)
+        + (15 * e2**2 / 256 + 45 * e2**3 / 1024) * math.sin(4 * lat_rad)
+        - (35 * e2**3 / 3072) * math.sin(6 * lat_rad)
+    )
+    easting = 500000 + k0 * N * (A + (1 - T + C) * A**3 / 6 + (5 - 18 * T + T**2 + 72 * C - 58 * ep2) * A**5 / 120)
+    northing = k0 * (M + N * math.tan(lat_rad) * (A**2 / 2 + (5 - T + 9 * C + 4 * C**2) * A**4 / 24 + (61 - 58 * T + T**2 + 600 * C - 330 * ep2) * A**6 / 720))
+
+    # ~0.3m/pixel at this scale gives a good neighbourhood view
+    half_w = width * 0.3
+    half_h = height * 0.3
+    bbox = f"{easting - half_w},{northing - half_h},{easting + half_w},{northing + half_h}"
 
     url = "https://api.dataforsyningen.dk/orto_foraar_DAF"
     params = {
@@ -326,20 +342,71 @@ def _fetch_static_map(lat: float, lng: float, width: int = 600, height: int = 30
         "version": "1.1.1",
         "request": "GetMap",
         "layers": "orto_foraar",
-        "srs": "EPSG:3857",
+        "styles": "",
+        "srs": "EPSG:25832",
         "bbox": bbox,
         "width": width,
         "height": height,
         "format": "image/png",
-        "token": token,
+        "token": DATAFORSYNINGEN_TOKEN,
     }
     try:
         resp = requests.get(url, params=params, timeout=15)
-        if resp.ok and resp.headers.get("content-type", "").startswith("image"):
+        if resp.ok and resp.headers.get("content-type", "").startswith("image/"):
             return b64.b64encode(resp.content).decode()
     except Exception:
         pass
     return None
+
+
+def _fetch_osm_map(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
+    """Fallback: fetch a static map from OpenStreetMap tiles (no token required)."""
+    import base64 as b64
+    import io
+    import math
+
+    from PIL import Image as PILImage
+
+    zoom = 16
+    tile_size = 256
+    n = 2 ** zoom
+    x_tile = (lng + 180.0) / 360.0 * n
+    y_tile = (1.0 - math.log(math.tan(math.radians(lat)) + 1.0 / math.cos(math.radians(lat))) / math.pi) / 2.0 * n
+    tiles_x = math.ceil(width / tile_size) + 1
+    tiles_y = math.ceil(height / tile_size) + 1
+    center_tx = int(x_tile)
+    center_ty = int(y_tile)
+    px_offset = int((x_tile - center_tx) * tile_size)
+    py_offset = int((y_tile - center_ty) * tile_size)
+    composite = PILImage.new("RGB", (tiles_x * tile_size, tiles_y * tile_size))
+    start_tx = center_tx - tiles_x // 2
+    start_ty = center_ty - tiles_y // 2
+
+    try:
+        for dx in range(tiles_x):
+            for dy in range(tiles_y):
+                tx = (start_tx + dx) % n
+                ty = start_ty + dy
+                if ty < 0 or ty >= n:
+                    continue
+                url = f"https://tile.openstreetmap.org/{zoom}/{tx}/{ty}.png"
+                resp = requests.get(url, timeout=10, headers={"User-Agent": "NosyneighbourPDF/1.0"})
+                if resp.ok:
+                    tile_img = PILImage.open(io.BytesIO(resp.content))
+                    composite.paste(tile_img, (dx * tile_size, dy * tile_size))
+        crop_x = (tiles_x // 2) * tile_size + px_offset - width // 2
+        crop_y = (tiles_y // 2) * tile_size + py_offset - height // 2
+        result = composite.crop((crop_x, crop_y, crop_x + width, crop_y + height))
+        buf = io.BytesIO()
+        result.save(buf, format="PNG")
+        return b64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+def _fetch_static_map(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
+    """Fetch aerial photo from Dataforsyningen if token is set, else fall back to OSM."""
+    return _fetch_aerial_photo(lat, lng, width, height) or _fetch_osm_map(lat, lng, width, height)
 
 
 @app.get("/api/report")
