@@ -104,7 +104,15 @@ _KOMMUNE_KODER = {
 
 def kommune_kode(kommune_navn: str) -> str | None:
     """Map a Danish municipality name to its 3-digit DST code."""
-    return _KOMMUNE_KODER.get(kommune_navn)
+    if not kommune_navn:
+        return None
+    # Tinglysning returns "Københavns Kommune" — strip the suffix
+    name = kommune_navn.removesuffix(" Kommune").removesuffix("s")
+    result = _KOMMUNE_KODER.get(name)
+    if result:
+        return result
+    # Try exact match (handles names like "Bornholm" that don't get 's' suffix)
+    return _KOMMUNE_KODER.get(kommune_navn.removesuffix(" Kommune"))
 
 
 # DST region (landsdel) codes for EJ67 price index.
