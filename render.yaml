@@ -14,3 +14,5 @@ services:
         sync: false
       - key: DATAFORDELER_PASSWORD
         sync: false
+      - key: DATAFORSYNINGEN_TOKEN
+        sync: false

@@ -6,6 +6,8 @@ Serves a map-based UI, a JSON REST API, and an MCP server at POST /mcp.
 
 import logging
 import os
+import re
+import unicodedata
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +18,6 @@ from fastapi.responses import HTMLResponse, Response
 from jinja2 import Environment, FileSystemLoader
 from mcp.server.fastmcp import FastMCP
 import uvicorn
-from weasyprint import HTML
 
 from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics, fetch_bbr_data
 
@@ -32,6 +33,21 @@ _client = TinglysningClient()
 
 with open("templates/index.html") as f:
     _index_html = f.read()
+
+
+def _render_pdf(html_content: str) -> bytes:
+    try:
+        from weasyprint import HTML
+    except OSError as e:
+        log.exception("WeasyPrint native dependencies are missing")
+        raise HTTPException(status_code=503, detail="PDF generation is not available on this server") from e
+    return HTML(string=html_content).write_pdf()
+
+
+def _report_filename(address: str | None) -> str:
+    ascii_address = unicodedata.normalize("NFKD", address or "ejendom").encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", ascii_address).strip("_").lower()
+    return f"rapport_{slug or 'ejendom'}.pdf"
 
 
 def _annotate_loan_types(tingbog: dict) -> dict:
@@ -469,10 +485,9 @@ def report(q: str = Query(...)):
         price_trend=price_trend,
         generated_at=datetime.now().strftime("%d-%m-%Y %H:%M"),
     )
-    pdf_bytes = HTML(string=html_content).write_pdf()
+    pdf_bytes = _render_pdf(html_content)
 
-    address_slug = data.get("adresse", "ejendom").replace(" ", "_").replace(",", "")
-    filename = f"rapport_{address_slug}.pdf"
+    filename = _report_filename(data.get("adresse"))
 
     return Response(
         content=pdf_bytes,
