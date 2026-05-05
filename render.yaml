@@ -4,6 +4,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
+    autoDeploy: yes
     envVars:
       - key: PORT
         value: 8000
