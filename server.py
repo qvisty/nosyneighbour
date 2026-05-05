@@ -5,6 +5,7 @@ Serves a map-based UI, a JSON REST API, and an MCP server at POST /mcp.
 """
 
 import logging
+import math
 import os
 import re
 import unicodedata
@@ -13,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from jinja2 import Environment, FileSystemLoader
 from mcp.server.fastmcp import FastMCP
@@ -527,6 +528,66 @@ def bbr(q: str = Query(...)):
     if data is None:
         raise HTTPException(status_code=502, detail="Could not fetch BBR data")
     return data
+
+
+def _merc_to_wgs84(x: float, y: float) -> tuple[float, float]:
+    """Convert EPSG:3857 (Web Mercator) to WGS84 lon/lat."""
+    lon = (x / 20037508.342) * 180.0
+    lat = math.degrees(2.0 * math.atan(math.exp(y / 6378137.0)) - math.pi / 2.0)
+    return lon, lat
+
+
+def _wgs84_to_utm32n(lon: float, lat: float) -> tuple[float, float]:
+    """Convert WGS84 lon/lat to EPSG:25832 (UTM zone 32N) easting/northing."""
+    a = 6378137.0
+    e2 = 0.00669437999014
+    k0 = 0.9996
+    lon0 = math.radians(9.0)
+    phi = math.radians(lat)
+    lam = math.radians(lon)
+    N = a / math.sqrt(1.0 - e2 * math.sin(phi) ** 2)
+    T = math.tan(phi) ** 2
+    C = (e2 / (1.0 - e2)) * math.cos(phi) ** 2
+    A = math.cos(phi) * (lam - lon0)
+    M = a * (
+        (1.0 - e2 / 4.0 - 3.0 * e2 ** 2 / 64.0) * phi
+        - (3.0 * e2 / 8.0 + 3.0 * e2 ** 2 / 32.0) * math.sin(2.0 * phi)
+        + (15.0 * e2 ** 2 / 256.0) * math.sin(4.0 * phi)
+    )
+    easting = k0 * N * (A + (1.0 - T + C) * A ** 3 / 6.0 + (5.0 - 18.0 * T + T ** 2) * A ** 5 / 120.0) + 500000.0
+    northing = k0 * (M + N * math.tan(phi) * (A ** 2 / 2.0 + (5.0 - T + 9.0 * C + 4.0 * C ** 2) * A ** 4 / 24.0 + (61.0 - 58.0 * T + T ** 2) * A ** 6 / 720.0))
+    return easting, northing
+
+
+@app.get("/wms-proxy")
+def wms_proxy(req: Request):
+    """Proxy WMS tile requests from Leaflet (EPSG:3857) to miljoegis.mim.dk (EPSG:25832)."""
+    params = dict(req.query_params)
+    servicename = params.pop("servicename", "miljoegis-mst_wms")
+
+    # Transform BBOX from EPSG:3857 to EPSG:25832
+    bbox_str = params.get("BBOX") or params.get("bbox", "")
+    if bbox_str:
+        try:
+            x_min, y_min, x_max, y_max = map(float, bbox_str.split(","))
+            lon_min, lat_min = _merc_to_wgs84(x_min, y_min)
+            lon_max, lat_max = _merc_to_wgs84(x_max, y_max)
+            e_min, n_min = _wgs84_to_utm32n(lon_min, lat_min)
+            e_max, n_max = _wgs84_to_utm32n(lon_max, lat_max)
+            params["BBOX"] = f"{e_min:.2f},{n_min:.2f},{e_max:.2f},{n_max:.2f}"
+            params.pop("bbox", None)
+        except (ValueError, ZeroDivisionError):
+            pass
+    params["SRS"] = "EPSG:25832"
+    params.pop("srs", None)
+
+    url = f"https://miljoegis.mim.dk/wms?servicename={servicename}"
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    content_type = resp.headers.get("content-type", "image/png")
+    return Response(content=resp.content, media_type=content_type)
 
 
 @app.get("/", response_class=HTMLResponse)

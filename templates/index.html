@@ -383,7 +383,8 @@ const wmsLayers = {
     opacity: 0.55,
     attribution: 'Vejdirektoratet',
   }),
-  flood: L.tileLayer.wms('https://miljoegis.mim.dk/wms?servicename=miljoegis-klimatilpasningsplaner_wms', {
+  flood: L.tileLayer.wms('/wms-proxy', {
+    servicename: 'miljoegis-klimatilpasningsplaner_wms',
     layers: 'theme-klimatilp-vektor-hojvandshaendelse2050middel100aars',
     format: 'image/png',
     transparent: true,
@@ -391,7 +392,8 @@ const wmsLayers = {
     opacity: 0.55,
     attribution: 'MiljøGIS / Kystdirektoratet',
   }),
-  fredskov: L.tileLayer.wms('https://miljoegis.mim.dk/wms?servicename=miljoegis-mst_wms', {
+  fredskov: L.tileLayer.wms('/wms-proxy', {
+    servicename: 'miljoegis-mst_wms',
     layers: 'theme-skov_fredskov_ba2014',
     format: 'image/png',
     transparent: true,
@@ -399,7 +401,8 @@ const wmsLayers = {
     opacity: 0.55,
     attribution: 'MiljøGIS / Miljøstyrelsen',
   }),
-  natur: L.tileLayer.wms('https://miljoegis.mim.dk/wms?servicename=miljoegis-mst_wms', {
+  natur: L.tileLayer.wms('/wms-proxy', {
+    servicename: 'miljoegis-mst_wms',
     layers: 'theme-ais_bes_naturtyper',
     format: 'image/png',
     transparent: true,
