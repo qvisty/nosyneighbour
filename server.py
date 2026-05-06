@@ -314,18 +314,23 @@ def transport(lat: float = Query(...), lng: float = Query(...), max_results: int
     return {"stops": stops, "departures": departures}
 
 
-def _fetch_aerial_photo(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
-    """Fetch an aerial photo from Dataforsyningen WMS (requires DATAFORSYNINGEN_TOKEN)."""
-    import base64 as b64
+WMS_LAYER_CONFIG = {
+    "stoej": {
+        "url": "https://vmgeoserver.vd.dk/geoserver/VD/ows",
+        "layer": "stoejkort",
+    },
+    "lokalplan": {
+        "url": "https://geoserver.plandata.dk/geoserver/wms",
+        "layer": "pdk:theme_pdk_lokalplan_vedtaget",
+    },
+}
+
+
+def _latlng_to_utm32(lat: float, lng: float) -> tuple[float, float]:
+    """Convert WGS84 lat/lng to EPSG:25832 (UTM zone 32N) easting/northing."""
     import math
-
-    if not DATAFORSYNINGEN_TOKEN:
-        return None
-
-    # Convert WGS84 lat/lng to EPSG:25832 (UTM zone 32N) used by Danish services
     lat_rad = math.radians(lat)
     lng_rad = math.radians(lng)
-    # UTM zone 32N central meridian = 9°E
     lng0 = math.radians(9.0)
     k0 = 0.9996
     a = 6378137.0
@@ -345,6 +350,68 @@ def _fetch_aerial_photo(lat: float, lng: float, width: int = 600, height: int = 
     )
     easting = 500000 + k0 * N * (A + (1 - T + C) * A**3 / 6 + (5 - 18 * T + T**2 + 72 * C - 58 * ep2) * A**5 / 120)
     northing = k0 * (M + N * math.tan(lat_rad) * (A**2 / 2 + (5 - T + 9 * C + 4 * C**2) * A**4 / 24 + (61 - 58 * T + T**2 + 600 * C - 330 * ep2) * A**6 / 720))
+    return easting, northing
+
+
+def _fetch_wms_overlay(lat: float, lng: float, layer_key: str, width: int = 600, height: int = 300) -> bytes | None:
+    """Fetch a transparent WMS PNG overlay for the given layer and bounding box."""
+    config = WMS_LAYER_CONFIG.get(layer_key)
+    if not config:
+        return None
+    easting, northing = _latlng_to_utm32(lat, lng)
+    half_w = width * 0.3
+    half_h = height * 0.3
+    bbox = f"{easting - half_w},{northing - half_h},{easting + half_w},{northing + half_h}"
+    params = {
+        "service": "WMS",
+        "version": "1.1.1",
+        "request": "GetMap",
+        "layers": config["layer"],
+        "styles": "",
+        "srs": "EPSG:25832",
+        "bbox": bbox,
+        "width": width,
+        "height": height,
+        "format": "image/png",
+        "transparent": "true",
+    }
+    try:
+        resp = requests.get(config["url"], params=params, timeout=15)
+        if resp.ok and "image" in resp.headers.get("content-type", ""):
+            return resp.content
+    except Exception:
+        pass
+    return None
+
+
+def _composite_wms_overlays(map_b64: str, lat: float, lng: float, active_layers: list[str], width: int, height: int) -> str:
+    """Alpha-composite WMS overlay PNGs on top of a base64-encoded map image."""
+    import base64 as b64
+    import io
+    from PIL import Image as PILImage
+
+    base_img = PILImage.open(io.BytesIO(b64.b64decode(map_b64))).convert("RGBA")
+    for layer_key in active_layers:
+        overlay_bytes = _fetch_wms_overlay(lat, lng, layer_key, width, height)
+        if overlay_bytes:
+            try:
+                overlay = PILImage.open(io.BytesIO(overlay_bytes)).convert("RGBA")
+                base_img = PILImage.alpha_composite(base_img, overlay)
+            except Exception:
+                pass
+    buf = io.BytesIO()
+    base_img.save(buf, format="PNG")
+    return b64.b64encode(buf.getvalue()).decode()
+
+
+def _fetch_aerial_photo(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
+    """Fetch an aerial photo from Dataforsyningen WMS (requires DATAFORSYNINGEN_TOKEN)."""
+    import base64 as b64
+
+    if not DATAFORSYNINGEN_TOKEN:
+        return None
+
+    easting, northing = _latlng_to_utm32(lat, lng)
 
     # ~0.3m/pixel at this scale gives a good neighbourhood view
     half_w = width * 0.3
@@ -419,13 +486,38 @@ def _fetch_osm_map(lat: float, lng: float, width: int = 600, height: int = 300) 
         return None
 
 
+def _add_center_marker(map_b64: str, width: int, height: int) -> str:
+    """Draw a red pin marker at the center of a base64-encoded map image."""
+    import base64 as b64
+    import io
+
+    from PIL import Image as PILImage, ImageDraw
+
+    img = PILImage.open(io.BytesIO(b64.b64decode(map_b64))).convert("RGBA")
+    draw = ImageDraw.Draw(img)
+    cx, cy = width // 2, height // 2
+    r = 10
+    # White border
+    draw.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill=(255, 255, 255, 255))
+    # Red dot
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(220, 38, 38, 255))
+    # Small dark centre dot
+    draw.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=(120, 0, 0, 255))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return b64.b64encode(buf.getvalue()).decode()
+
+
 def _fetch_static_map(lat: float, lng: float, width: int = 600, height: int = 300) -> str | None:
     """Fetch aerial photo from Dataforsyningen if token is set, else fall back to OSM."""
-    return _fetch_aerial_photo(lat, lng, width, height) or _fetch_osm_map(lat, lng, width, height)
+    result = _fetch_aerial_photo(lat, lng, width, height) or _fetch_osm_map(lat, lng, width, height)
+    if result:
+        result = _add_center_marker(result, width, height)
+    return result
 
 
 @app.get("/api/report")
-def report(q: str = Query(...)):
+def report(q: str = Query(...), layers: str = Query(default="")):
     try:
         postnummer, vejnavn, husnummer = _client.resolve_address(q)
         tingbog = _client.lookup_address(postnummer, vejnavn, husnummer)
@@ -435,9 +527,14 @@ def report(q: str = Query(...)):
         raise HTTPException(status_code=404, detail="No property data found")
     data = _annotate_loan_types(tingbog)
 
+    active_layers = [l.strip() for l in layers.split(",") if l.strip() in WMS_LAYER_CONFIG] if layers else []
+
     # Resolve coordinates for map and get adgangsadresse_id for BBR
     map_base64 = None
     bbr_data = None
+    map_width, map_height = 600, 300
+    map_lat: float | None = None
+    map_lng: float | None = None
     try:
         auto_results = _client.autocomplete_address(q)
         if auto_results:
@@ -445,12 +542,20 @@ def report(q: str = Query(...)):
             lat = addr_data.get("y")
             lng = addr_data.get("x")
             if lat and lng:
-                map_base64 = _fetch_static_map(float(lat), float(lng))
+                map_lat = float(lat)
+                map_lng = float(lng)
+                map_base64 = _fetch_static_map(map_lat, map_lng, map_width, map_height)
             adgangsadresse_id = addr_data.get("id")
             if adgangsadresse_id:
                 bbr_data = fetch_bbr_data(adgangsadresse_id)
     except Exception:
         pass
+
+    if map_base64 and active_layers and map_lat is not None and map_lng is not None:
+        try:
+            map_base64 = _composite_wms_overlays(map_base64, map_lat, map_lng, active_layers, map_width, map_height)
+        except Exception:
+            pass
 
     # Fetch neighbourhood statistics
     demographics = None

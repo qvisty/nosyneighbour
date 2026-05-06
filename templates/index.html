@@ -971,7 +971,11 @@ function renderMortgage(h) {
 }
 
 async function downloadPdf(label) {
-  const url = `/api/report?q=${encodeURIComponent(label)}`;
+  const activeLayers = [];
+  if (document.getElementById('layer-stoej')?.checked) activeLayers.push('stoej');
+  if (document.getElementById('layer-lokalplan')?.checked) activeLayers.push('lokalplan');
+  let url = `/api/report?q=${encodeURIComponent(label)}`;
+  if (activeLayers.length > 0) url += `&layers=${activeLayers.join(',')}`;
   const a = document.createElement('a');
   a.href = url;
   a.download = '';
