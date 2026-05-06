@@ -637,7 +637,7 @@ function renderEntryCards(container, d, valuations, transport, climate, bbr, ent
         <tr style="border-top:1px solid #f3f4f6">
           <td colspan="2" style="font-weight:600;padding-top:6px">${b.anvendelse || 'Bygning ' + b.bygningsnr}</td>
         </tr>`;
-      if (b.byggeaar) bbrRows += `<tr><td>Byggeår</td><td>${b.byggeaar}</td></tr>`;
+      if (b.byggeår) bbrRows += `<tr><td>Byggeår</td><td>${b.byggeår}</td></tr>`;
       if (b.antal_etager) bbrRows += `<tr><td>Etager</td><td>${b.antal_etager}</td></tr>`;
       if (b.antal_enheder) bbrRows += `<tr><td>Enheder</td><td>${b.antal_enheder}</td></tr>`;
       if (b.har_elevator) bbrRows += `<tr><td>Elevator</td><td>Ja</td></tr>`;
@@ -991,8 +991,8 @@ function renderNeighbourhoodCard(data, cardEl) {
     content += `<div class="nabo-legend" style="margin-top:4px">Difference = kommune vs. landsgennemsnit</div></div>`;
   }
 
-  if (data.arbejdsloeshed) {
-    const arb = data.arbejdsloeshed;
+  if (data.arbejdsløshed) {
+    const arb = data.arbejdsløshed;
     const diff = arb.land_pct != null ? arb.kommune_pct - arb.land_pct : null;
     const diffCls = diff > 0 ? 'neg' : diff < 0 ? 'pos' : '';
     const diffStr = diff !== null ? `<span class="nabo-income-diff ${diffCls}">${diff > 0 ? '+' : ''}${diff.toFixed(1)} pp.</span>` : '';

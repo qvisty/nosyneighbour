@@ -126,11 +126,11 @@
 {% if bbr_data and bbr_data.bygninger %}
 <h2>Bygningsdata (BBR)</h2>
 <table>
-  <tr><th>Bygning</th><th>Bygge&aring;r</th><th>Etager</th><th>Enheder</th><th>Elevator</th></tr>
+  <tr><th>Bygning</th><th>Byggeår</th><th>Etager</th><th>Enheder</th><th>Elevator</th></tr>
   {% for b in bbr_data.bygninger %}
   <tr>
     <td>{{ b.anvendelse or ('Bygning ' ~ b.bygningsnr) }}</td>
-    <td>{{ b.byggeaar or '&ndash;' }}</td>
+    <td>{{ b.byggeår or '&ndash;' }}</td>
     <td>{{ b.antal_etager or '&ndash;' }}</td>
     <td>{{ b.antal_enheder or '&ndash;' }}</td>
     <td>{{ 'Ja' if b.har_elevator else 'Nej' }}</td>
@@ -152,8 +152,8 @@
 {% if data.vurdering %}
 <h2>Vurdering ({{ data.vurdering.vurderingsdato }})</h2>
 <table>
-  <tr><td class="label">Ejendomsv&aelig;rdi</td><td class="value">{{ "{:,}".format(data.vurdering.ejendomsvaerdi).replace(",", ".") }} kr.</td></tr>
-  <tr><td class="label">Grundv&aelig;rdi</td><td class="value">{{ "{:,}".format(data.vurdering.grundvaerdi).replace(",", ".") }} kr.</td></tr>
+  <tr><td class="label">Ejendomsværdi</td><td class="value">{{ "{:,}".format(data.vurdering.ejendomsvaerdi).replace(",", ".") }} kr.</td></tr>
+  <tr><td class="label">Grundværdi</td><td class="value">{{ "{:,}".format(data.vurdering.grundvaerdi).replace(",", ".") }} kr.</td></tr>
   <tr><td class="label">Kommune</td><td class="value">{{ data.vurdering.kommune }}</td></tr>
 </table>
 {% endif %}
@@ -169,7 +169,7 @@
 {% endif %}
 
 {% if data.haeftelser %}
-<h2>H&aelig;ftelser</h2>
+<h2>Hæftelser</h2>
 {% for h in data.haeftelser %}
 <div class="mortgage-item">
   <div class="mortgage-header">
@@ -187,7 +187,7 @@
     {% elif lti.source == "estimated" and not lti.uncertain and lti.loan_type %}
       <span class="loan-badge badge-certain">{{ lti.loan_type }} (estimeret)</span>
     {% elif lti.source == "estimated" and lti.uncertain %}
-      <span class="loan-badge badge-uncertain">Usikker l&aring;ntype</span>
+      <span class="loan-badge badge-uncertain">Usikker låntype</span>
     {% endif %}
   {% endif %}
 </div>
@@ -205,7 +205,7 @@
 <h2>Prisudvikling ({{ price_trend.region }})</h2>
 <p style="font-size:10px; color:#6b7280; margin-bottom:8px;">Kilde: {{ price_trend.kilde }}</p>
 <table>
-  <tr><th>&Aring;r</th><th>Ejendomsv&aelig;rdi (est.)</th><th>Grundv&aelig;rdi (est.)</th></tr>
+  <tr><th>År</th><th>Ejendomsværdi (est.)</th><th>Grundværdi (est.)</th></tr>
   {% for v in price_trend.vurderinger[-8:] %}
   <tr>
     <td>{{ v.aar }}</td>
@@ -239,7 +239,7 @@
 {% if demographics.indkomst %}
 <h2>Indkomst ({{ demographics.indkomst.aar }})</h2>
 <table>
-  <tr><th>M&aring;l</th><th>Kommune</th><th>Hele landet</th></tr>
+  <tr><th>Mål</th><th>Kommune</th><th>Hele landet</th></tr>
   {% for item in demographics.indkomst.poster %}
   <tr>
     <td>{{ item.label }}</td>
@@ -249,14 +249,14 @@
   {% endfor %}
 </table>
 {% endif %}
-{% if demographics.arbejdsloeshed %}
-<h2>Arbejdsl&oslash;shed ({{ demographics.arbejdsloeshed.aar }})</h2>
+{% if demographics.arbejdsløshed %}
+<h2>Arbejdsløshed ({{ demographics.arbejdsløshed.aar }})</h2>
 <table>
-  <tr><th>M&aring;l</th><th>Kommune</th><th>Hele landet</th></tr>
+  <tr><th>Mål</th><th>Kommune</th><th>Hele landet</th></tr>
   <tr>
     <td>Ledige i pct. af arbejdsstyrken</td>
-    <td>{{ "%.1f"|format(demographics.arbejdsloeshed.kommune_pct) }}%</td>
-    <td>{% if demographics.arbejdsloeshed.land_pct is not none %}{{ "%.1f"|format(demographics.arbejdsloeshed.land_pct) }}%{% else %}&ndash;{% endif %}</td>
+    <td>{{ "%.1f"|format(demographics.arbejdsløshed.kommune_pct) }}%</td>
+    <td>{% if demographics.arbejdsløshed.land_pct is not none %}{{ "%.1f"|format(demographics.arbejdsløshed.land_pct) }}%{% else %}&ndash;{% endif %}</td>
   </tr>
 </table>
 {% endif %}

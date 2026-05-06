@@ -241,7 +241,7 @@ def fetch_dst_demographics(kommunekode: str) -> dict | None:
     if income:
         result["indkomst"] = income
     if unemployment:
-        result["arbejdsloeshed"] = unemployment
+        result["arbejdsløshed"] = unemployment
     return result
 
 
@@ -249,7 +249,7 @@ def fetch_bbr_data(adgangsadresse_id: str) -> dict | None:
     """Fetch building data from BBR via grunddata.filarkiv.dk.
 
     Uses the adgangsadresse UUID to look up buildings at the address.
-    Returns a dict with byggeaar, anvendelse, etager, and enheder for each building.
+    Returns a dict with byggeår, anvendelse, etager, and enheder for each building.
     """
     try:
         resp = requests.get(GRUNDDATA_BBR_URL, params={
@@ -271,7 +271,7 @@ def fetch_bbr_data(adgangsadresse_id: str) -> dict | None:
             "bygningsnr": (b.get("BygningsNr") or "").strip(),
             "anvendelse_kode": anvendelse.get("Kode"),
             "anvendelse": anvendelse.get("Tekst"),
-            "byggeaar": b.get("OpfoerelseAar"),
+            "byggeår": b.get("OpfoerelseAar"),
             "antal_etager": len(b.get("Etager") or []),
             "har_elevator": any(
                 o.get("HarElevator") for o in (b.get("Opgange") or [])
