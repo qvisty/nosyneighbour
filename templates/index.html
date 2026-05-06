@@ -223,6 +223,25 @@
       color: #6b7280;
     }
 
+    /* ── Vejpriser ── */
+    .vejpriser-btn {
+      width: 100%; padding: 8px 12px; background: #f0f6ff; border: 1px solid #bfdbfe;
+      border-radius: 8px; color: #1d4ed8; font-size: 12px; font-weight: 600;
+      cursor: pointer; text-align: center; margin-top: 4px;
+    }
+    .vejpriser-btn:hover { background: #dbeafe; }
+    .vejpriser-btn:disabled { background: #f3f4f6; color: #9ca3af; border-color: #e5e7eb; cursor: not-allowed; }
+    .vejpris-section { margin-top: 8px; }
+    .vejpris-section-title { font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 4px; }
+    .vejpris-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 12px; border-bottom: 1px solid #f3f4f6; }
+    .vejpris-item:last-child { border-bottom: none; }
+    .vejpris-rank { font-weight: 700; margin-right: 6px; }
+    .vejpris-rank-billig { color: #16a34a; }
+    .vejpris-rank-dyr { color: #dc2626; }
+    .vejpris-addr { flex: 1; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+    .vejpris-val { color: #111; font-weight: 500; white-space: nowrap; }
+    .vejpris-note { font-size: 10px; color: #9ca3af; margin-top: 6px; }
+
     /* ── Map ── */
     #map { flex: 1; cursor: crosshair; }
 
@@ -237,6 +256,16 @@
       border: 2px solid #fff;
       box-shadow: 0 1px 4px rgba(0,0,0,.4);
     }
+    .price-pin {
+      border-radius: 50%;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.5);
+    }
+    .price-pin-billig { background: #16a34a; color: #fff; }
+    .price-pin-dyr    { background: #dc2626; color: #fff; }
 
     /* ── Neighbourhood stats ── */
     .nabo-bar-wrap { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
@@ -444,6 +473,17 @@ function numberedIcon(n) {
   });
 }
 
+function priceIcon(rank, type) {
+  const symbol = type === 'billig' ? '↓' : '↑';
+  return L.divIcon({
+    html: `<div class="price-pin price-pin-${type}">${symbol}${rank}</div>`,
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16],
+  });
+}
+
 map.on('click', async e => {
   if (entries.length >= 10) return;
   const { lat, lng } = e.latlng;
@@ -451,7 +491,7 @@ map.on('click', async e => {
   if (!res.ok) return;
   const addr = await res.json();
   input.value = '';
-  addAddress(addr.label, addr.lat, addr.lng);
+  addAddress(addr.label, addr.lat, addr.lng, { postnr: addr.postnr, vejnavn: addr.vejnavn });
 });
 
 // ── Autocomplete ───────────────────────────────────────────────────────────
@@ -500,16 +540,16 @@ function selectSuggestion(s) {
   hideSuggestions();
   if (entries.length >= 10) return;
   map.setView([s.lat, s.lng], 16);
-  addAddress(s.label, s.lat, s.lng);
+  addAddress(s.label, s.lat, s.lng, { postnr: s.postnr, vejnavn: s.vejnavn });
 }
 
 // ── Multi-address management ───────────────────────────────────────────────
-async function addAddress(label, lat, lng) {
+async function addAddress(label, lat, lng, meta = {}) {
   const idx = entries.length;
   const marker = L.marker([lat, lng], { icon: numberedIcon(idx + 1) }).addTo(map);
   marker.on('click', () => scrollToEntry(idx));
 
-  const entry = { label, lat, lng, data: null, valuations: null, bbr: null, error: null, loading: true, marker, adgangsadresse_id: null };
+  const entry = { label, lat, lng, data: null, valuations: null, bbr: null, error: null, loading: true, marker, adgangsadresse_id: null, postnr: meta.postnr || null, vejnavn: meta.vejnavn || null, vejpriser: null, vejpriserLoading: false, vejpriserMarkers: [] };
   entries.push(entry);
   renderSidebar();
 
@@ -565,6 +605,7 @@ async function addAddress(label, lat, lng) {
 function removeEntry(i) {
   map.removeLayer(entries[i].marker);
   (entries[i].stopMarkers || []).forEach(m => map.removeLayer(m));
+  (entries[i].vejpriserMarkers || []).forEach(m => map.removeLayer(m));
   entries.splice(i, 1);
   entries.forEach((e, j) => {
     e.marker.setIcon(numberedIcon(j + 1));
@@ -611,7 +652,7 @@ function renderSidebar() {
     } else if (entry.error) {
       section.appendChild(html(`<div style="color:#dc2626;padding:4px 0 10px">${entry.error}</div>`));
     } else if (entry.data) {
-      renderEntryCards(section, entry.data, entry.valuations, entry.transport, entry.climate, entry.bbr, i);
+      renderEntryCards(section, entry.data, entry.valuations, entry.transport, entry.climate, entry.bbr, i, entry);
     }
 
     el.appendChild(section);
@@ -621,7 +662,7 @@ function renderSidebar() {
   });
 }
 
-function renderEntryCards(container, d, valuations, transport, climate, bbr, entryIdx) {
+function renderEntryCards(container, d, valuations, transport, climate, bbr, entryIdx, entry) {
   container.appendChild(html(`
     <div class="card">
       <div class="address-header">${d.adresse}</div>
@@ -697,6 +738,30 @@ function renderEntryCards(container, d, valuations, transport, climate, bbr, ent
         </table>
       </div>
     `));
+  }
+
+  // Vejpriser comparison card
+  if (entry && entry.postnr && entry.vejnavn) {
+    if (entry.vejpriserLoading) {
+      container.appendChild(html(`
+        <div class="card">
+          <div class="card-title">Vejpriser — ${entry.vejnavn}</div>
+          <div class="spinner">Henter vejpriser (kan tage 10-20 sek.)…</div>
+        </div>
+      `));
+    } else if (entry.vejpriser && !entry.vejpriser.error) {
+      renderVejpriserCard(container, entry.vejpriser);
+    } else {
+      const errNote = entry.vejpriser?.error ? '<div style="font-size:11px;color:#dc2626;margin-bottom:6px">Kunne ikke hente vejpriser — prøv igen.</div>' : '';
+      container.appendChild(html(`
+        <div class="card">
+          <div class="card-title">Vejpriser — ${entry.vejnavn}</div>
+          ${errNote}
+          <button class="vejpriser-btn" onclick="loadVejpriser(${entryIdx})">Sammenlign priser på vejen</button>
+          <div style="font-size:10px;color:#9ca3af;margin-top:4px;text-align:center">Henter op til 12 adresser · typisk 10-20 sek.</div>
+        </div>
+      `));
+    }
   }
 
   if (d.ejere?.length) {
@@ -928,6 +993,74 @@ function html(str) {
   const t = document.createElement('template');
   t.innerHTML = str.trim();
   return t.content.firstChild;
+}
+
+// ── Vejpriser ──────────────────────────────────────────────────────────────
+async function loadVejpriser(idx) {
+  const entry = entries[idx];
+  if (!entry || !entry.postnr || !entry.vejnavn || entry.vejpriserLoading) return;
+  entry.vejpriserLoading = true;
+  renderSidebar();
+
+  try {
+    const url = `/api/vejpriser?vejnavn=${encodeURIComponent(entry.vejnavn)}&postnr=${encodeURIComponent(entry.postnr)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    // Remove old price markers if re-fetching
+    (entry.vejpriserMarkers || []).forEach(m => map.removeLayer(m));
+    entry.vejpriserMarkers = [];
+
+    (data.billigste || []).forEach((p, i) => {
+      const m = L.marker([p.lat, p.lng], { icon: priceIcon(i + 1, 'billig') }).addTo(map);
+      m.bindPopup(`<strong>${p.adresse}</strong><br><span style="color:#16a34a;font-weight:700">↓ Billigst #${i + 1}</span><br>${fmt(p.ejendomsvaerdi)} kr.`);
+      entry.vejpriserMarkers.push(m);
+    });
+    (data.dyreste || []).forEach((p, i) => {
+      const m = L.marker([p.lat, p.lng], { icon: priceIcon(i + 1, 'dyr') }).addTo(map);
+      m.bindPopup(`<strong>${p.adresse}</strong><br><span style="color:#dc2626;font-weight:700">↑ Dyreste #${i + 1}</span><br>${fmt(p.ejendomsvaerdi)} kr.`);
+      entry.vejpriserMarkers.push(m);
+    });
+
+    entry.vejpriser = data;
+  } catch {
+    entry.vejpriser = { error: true };
+  }
+
+  entry.vejpriserLoading = false;
+  renderSidebar();
+}
+
+function renderVejpriserCard(container, data) {
+  let billigsteRows = (data.billigste || []).map((p, i) => `
+    <div class="vejpris-item">
+      <span class="vejpris-rank vejpris-rank-billig">↓${i + 1}</span>
+      <span class="vejpris-addr" title="${p.adresse}">${p.adresse}</span>
+      <span class="vejpris-val">${fmt(p.ejendomsvaerdi)} kr.</span>
+    </div>`).join('');
+
+  let dyresteRows = (data.dyreste || []).map((p, i) => `
+    <div class="vejpris-item">
+      <span class="vejpris-rank vejpris-rank-dyr">↑${i + 1}</span>
+      <span class="vejpris-addr" title="${p.adresse}">${p.adresse}</span>
+      <span class="vejpris-val">${fmt(p.ejendomsvaerdi)} kr.</span>
+    </div>`).join('');
+
+  container.appendChild(html(`
+    <div class="card">
+      <div class="card-title">Vejpriser — ${data.vejnavn}</div>
+      <div class="vejpris-section">
+        <div class="vejpris-section-title" style="color:#16a34a">↓ Billigste</div>
+        ${billigsteRows}
+      </div>
+      <div class="vejpris-section" style="margin-top:10px">
+        <div class="vejpris-section-title" style="color:#dc2626">↑ Dyreste</div>
+        ${dyresteRows}
+      </div>
+      <div class="vejpris-note">Baseret på ${data.total_fetched} stikprøver · Ejendomsværdi fra tinglysning.dk</div>
+    </div>
+  `));
 }
 
 // ── Neighbourhood stats ─────────────────────────────────────────────────────

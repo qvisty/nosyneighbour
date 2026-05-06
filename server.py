@@ -529,6 +529,77 @@ def bbr(q: str = Query(...)):
     return data
 
 
+@app.get("/api/vejpriser")
+def vejpriser(
+    vejnavn: str = Query(..., description="Street name"),
+    postnr: str = Query(..., description="Postal code"),
+    max_addresses: int = Query(default=12, le=20, description="Max addresses to sample"),
+):
+    """Return cheapest and most expensive properties on a street by ejendomsværdi.
+
+    Fetches all addresses for the given street from DAWA, samples up to
+    max_addresses of them, looks up their valuations from tinglysning.dk,
+    and returns the 3 cheapest and 3 most expensive with coordinates.
+    """
+    import random
+
+    # 1. Fetch addresses from DAWA
+    try:
+        resp = requests.get(
+            "https://dawa.aws.dk/adgangsadresser",
+            params={"vejnavn": vejnavn, "postnr": postnr, "per_side": 50, "side": 1},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        addresses = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch addresses from DAWA: {e}")
+
+    if not addresses:
+        raise HTTPException(status_code=404, detail="No addresses found for this street")
+
+    if len(addresses) > max_addresses:
+        addresses = random.sample(addresses, max_addresses)
+
+    # 2. Sequential lookup of valuations (safe with shared TinglysningClient session)
+    results = []
+    for addr in addresses:
+        try:
+            postnr_val = addr["postnummer"]["nr"]
+            vejnavn_val = addr["vejstykke"]["navn"]
+            husnr_val = addr["husnr"]
+            coords = addr["adgangspunkt"]["koordinater"]  # [lng, lat]
+
+            tingbog = _client.lookup_address(postnr_val, vejnavn_val, husnr_val)
+            if tingbog and tingbog.get("vurdering"):
+                v = tingbog["vurdering"]
+                ev = v.get("ejendomsvaerdi")
+                if ev:
+                    results.append({
+                        "adresse": tingbog.get("adresse", f"{vejnavn_val} {husnr_val}"),
+                        "ejendomsvaerdi": ev,
+                        "grundvaerdi": v.get("grundvaerdi"),
+                        "lat": coords[1],
+                        "lng": coords[0],
+                    })
+        except Exception:
+            continue
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No valuation data found for this street")
+
+    results.sort(key=lambda x: x["ejendomsvaerdi"])
+    n = min(3, len(results))
+
+    return {
+        "vejnavn": vejnavn,
+        "postnr": postnr,
+        "total_fetched": len(results),
+        "billigste": results[:n],
+        "dyreste": list(reversed(results[-n:])),
+    }
+
+
 
 @app.get("/", response_class=HTMLResponse)
 def index():
