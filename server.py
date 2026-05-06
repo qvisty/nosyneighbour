@@ -31,8 +31,7 @@ log = logging.getLogger(__name__)
 
 _client = TinglysningClient()
 
-with open("templates/index.html") as f:
-    _index_html = f.read()
+_index_html_path = _templates_dir / "index.html"
 
 
 def _render_pdf(html_content: str) -> bytes:
@@ -603,7 +602,7 @@ def vejpriser(
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse(content=_index_html)
+    return HTMLResponse(content=_index_html_path.read_text())
 
 
 # Mount MCP last so FastAPI routes take priority when matching paths.
