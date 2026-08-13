@@ -9,6 +9,7 @@ Given any freeform Danish address you get:
 - **Estimated equity** (friværdi) — valuation minus total registered mortgage principals
 - **Mortgages and liens** (hæftelser) — including estimated loan type (F-kort / F1 / F3 / F5) for variable-rate realkreditlån
 - **Easements** (servitutter)
+- **Historical sales** (historiske handler) — previous sale prices for the address with date, price per m² and sale type, via [Boliga](https://www.boliga.dk)'s public register of published sales
 
 Loan type estimation works by matching the registered coupon rate against [Nationalbanken rate statistics](https://www.dst.dk/da/Statistik/emner/penge-og-kapitalmarked/renter/realkreditrenter) (DST table DNRNURI). When an ISIN is known, the type is confirmed definitively via [ESMA FIRDS](https://registers.esma.europa.eu).
 

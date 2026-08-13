@@ -571,11 +571,12 @@ async function addAddress(label, lat, lng, meta = {}) {
 
   // Fetch historical valuations, transport, and BBR data in background
   if (entry.data) {
-    const [vRes, tRes, cRes, bRes] = await Promise.allSettled([
+    const [vRes, tRes, cRes, bRes, sRes] = await Promise.allSettled([
       fetch(`/api/valuations?q=${encodeURIComponent(label)}`),
       fetch(`/api/transport?lat=${lat}&lng=${lng}`),
       fetch(`/api/climate?lat=${lat}&lng=${lng}`),
       fetch(`/api/bbr?q=${encodeURIComponent(label)}`),
+      fetch(`/api/sales?q=${encodeURIComponent(label)}`),
     ]);
     if (vRes.status === 'fulfilled' && vRes.value.ok) {
       entry.valuations = await vRes.value.json();
@@ -597,6 +598,9 @@ async function addAddress(label, lat, lng, meta = {}) {
     }
     if (bRes.status === 'fulfilled' && bRes.value.ok) {
       entry.bbr = await bRes.value.json();
+    }
+    if (sRes.status === 'fulfilled' && sRes.value.ok) {
+      entry.sales = await sRes.value.json();
     }
     renderSidebar();
   }
@@ -736,6 +740,28 @@ function renderEntryCards(container, d, valuations, transport, climate, bbr, ent
           <tr><td>Kommune</td><td>${v.kommune}</td></tr>
           ${debtRow}
         </table>
+      </div>
+    `));
+  }
+
+  // Historical sales card
+  if (entry && entry.sales && entry.sales.handler?.length) {
+    container.appendChild(html(`
+      <div class="card">
+        <div class="card-title">Historiske handler</div>
+        <table>${entry.sales.handler.map(h => `
+          <tr>
+            <td>
+              ${h.dato ? h.dato.split('-').reverse().join('-') : '–'}
+              ${h.adresse ? `<div style="font-size:10px;color:#9ca3af">${h.adresse}</div>` : ''}
+            </td>
+            <td>
+              <span style="font-weight:600">${h.pris ? fmt(h.pris) + ' kr.' : '–'}</span>
+              <div style="font-size:10px;color:#9ca3af">${[h.salgstype, h.kvmpris ? fmt(h.kvmpris) + ' kr./m²' : null, h.areal ? h.areal + ' m²' : null].filter(Boolean).join(' · ')}</div>
+            </td>
+          </tr>
+        `).join('')}</table>
+        <div style="font-size:10px;color:#9ca3af;margin-top:4px">Kilde: ${entry.sales.kilde}</div>
       </div>
     `));
   }
