@@ -158,6 +158,23 @@
 </table>
 {% endif %}
 
+{% if sales_history and sales_history.handler %}
+<h2>Historiske handler</h2>
+<p style="font-size:10px; color:#6b7280; margin-bottom:8px;">Kilde: {{ sales_history.kilde }}</p>
+<table>
+  <tr><th>Dato</th><th>Adresse</th><th>Pris</th><th>Salgstype</th><th>m&sup2;-pris</th></tr>
+  {% for h in sales_history.handler %}
+  <tr>
+    <td>{{ h.dato or '&ndash;' }}</td>
+    <td>{{ h.adresse or '&ndash;' }}</td>
+    <td>{% if h.pris %}{{ "{:,}".format(h.pris).replace(",", ".") }} kr.{% else %}&ndash;{% endif %}</td>
+    <td>{{ h.salgstype or '&ndash;' }}</td>
+    <td>{% if h.kvmpris %}{{ "{:,}".format(h.kvmpris).replace(",", ".") }} kr.{% else %}&ndash;{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 {% if data.ejere %}
 <h2>Ejere</h2>
 <table>

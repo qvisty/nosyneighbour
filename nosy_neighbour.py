@@ -24,6 +24,7 @@ DAWA_URL = "https://dawa.aws.dk/autocomplete"
 DST_API_URL = "https://api.statbank.dk/v1/data"
 FIRDS_URL = "https://registers.esma.europa.eu/solr/esma_registers_firds/select"
 GRUNDDATA_BBR_URL = "https://grunddata.filarkiv.dk/v1/bbr/bygninger"
+BOLIGA_SOLD_URL = "https://api.boliga.dk/api/v2/sold/search-results"
 
 # Maps DST RENTFIX codes to human-readable loan type names
 RENTFIX_LOAN_TYPES = {
@@ -286,6 +287,84 @@ def fetch_bbr_data(adgangsadresse_id: str) -> dict | None:
     return {
         "kilde": "BBR via grunddata.filarkiv.dk",
         "bygninger": bygninger,
+    }
+
+
+# Boliga propertyType codes → Danish property type names
+_BOLIGA_BOLIGTYPER = {
+    1: "Villa",
+    2: "Rækkehus",
+    3: "Ejerlejlighed",
+    4: "Fritidshus",
+    5: "Landejendom",
+    6: "Helårsgrund",
+    7: "Fritidsgrund",
+    8: "Villalejlighed",
+}
+
+
+def fetch_sales_history(vejnavn: str, husnummer: str, postnummer: str) -> dict | None:
+    """Fetch historical sales (offentliggjorte handler) for an address from Boliga.
+
+    Queries Boliga's public sold-property search filtered to the street and
+    postal code, then keeps only records matching the exact house number.
+    For ejerlejligheder this includes every unit at the address.
+
+    Returns {"kilde": ..., "adresse": ..., "handler": [...]} where each handel
+    has dato, adresse, pris, kvmpris, salgstype, boligtype, areal, vaerelser
+    and byggeaar. Returns None if Boliga cannot be reached.
+    """
+    try:
+        resp = requests.get(BOLIGA_SOLD_URL, params={
+            "searchTab": 1,
+            "page": 1,
+            "pagesize": 50,
+            "sort": "date-d",
+            "street": f"{vejnavn} {husnummer}",
+            "zipcodeFrom": postnummer,
+            "zipcodeTo": postnummer,
+        }, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }, timeout=15)
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception:
+        return None
+
+    # The street filter is a prefix search, so "Vejnavn 2" also returns
+    # "Vejnavn 24" — require a boundary right after the house number.
+    addr_re = re.compile(
+        rf"^\s*{re.escape(vejnavn)}\s+{re.escape(husnummer)}\s*(?:$|[,\s])",
+        re.IGNORECASE,
+    )
+
+    handler = []
+    for r in raw.get("results") or []:
+        adresse = (r.get("address") or "").strip()
+        if not addr_re.match(adresse):
+            continue
+        zipcode = str(r.get("zipCode") or "")
+        if zipcode and zipcode != str(postnummer):
+            continue
+        handler.append({
+            "dato": (r.get("soldDate") or "")[:10],
+            "adresse": adresse,
+            "pris": r.get("price"),
+            "kvmpris": round(r["sqmPrice"]) if r.get("sqmPrice") else None,
+            "salgstype": r.get("saleType"),
+            "boligtype": _BOLIGA_BOLIGTYPER.get(r.get("propertyType")),
+            "areal": r.get("size"),
+            "vaerelser": r.get("rooms"),
+            "byggeaar": r.get("buildYear"),
+        })
+
+    handler.sort(key=lambda h: h["dato"], reverse=True)
+
+    return {
+        "kilde": "Boliga (offentliggjorte handler)",
+        "adresse": f"{vejnavn} {husnummer}, {postnummer}",
+        "handler": handler,
     }
 
 
@@ -947,6 +1026,19 @@ def main():
         print("\nEasements:")
         for s in result["servitutter"]:
             print(f"  [{s['prioritet']}] {s['tekst']}")
+
+    sales = fetch_sales_history(vejnavn, husnummer, postnummer)
+    if sales and sales["handler"]:
+        print(f"\nHistorical sales ({sales['kilde']}):")
+        for h in sales["handler"]:
+            pris = f"{h['pris']:,} DKK" if h.get("pris") else "?"
+            details = " · ".join(x for x in (
+                h.get("salgstype"),
+                f"{h['kvmpris']:,} DKK/m2" if h.get("kvmpris") else None,
+                h.get("boligtype"),
+            ) if x)
+            print(f"  {h['dato']}  {h['adresse']}: {pris}"
+                  + (f"  ({details})" if details else ""))
 
 
 if __name__ == "__main__":

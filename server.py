@@ -19,7 +19,7 @@ from jinja2 import Environment, FileSystemLoader
 from mcp.server.fastmcp import FastMCP
 import uvicorn
 
-from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics, fetch_bbr_data
+from nosy_neighbour import TinglysningClient, get_loan_type_info, kommune_kode, fetch_price_trend, fetch_dst_demographics, fetch_bbr_data, fetch_sales_history
 
 DAWA_REVERSE_URL = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
 DATAFORSYNINGEN_TOKEN = os.environ.get("DATAFORSYNINGEN_TOKEN", "")
@@ -80,6 +80,24 @@ def lookup_property(address: str) -> dict:
     if tingbog is None:
         return {"error": "No property data found"}
     return _annotate_loan_types(tingbog)
+
+
+@mcp_server.tool()
+def sales_history(address: str) -> dict:
+    """Look up historical sales (handler) for a Danish property.
+
+    Given a freeform Danish address, returns previous sale prices for the
+    address — date, price, price per m2 and sale type (e.g. Alm. Salg,
+    Fam. Salg, Auktion) — from Boliga's public register of published sales.
+    """
+    try:
+        postnummer, vejnavn, husnummer = _client.resolve_address(address)
+    except RuntimeError as e:
+        return {"error": str(e)}
+    data = fetch_sales_history(vejnavn, husnummer, postnummer)
+    if data is None:
+        return {"error": "Could not fetch sales data"}
+    return data
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -202,6 +220,19 @@ def valuations(q: str = Query(...)):
         "region": trend["region"] if trend else None,
         "history": history,
     }
+
+
+@app.get("/api/sales")
+def sales(q: str = Query(...)):
+    """Return historical sales (handler) for an address from Boliga."""
+    try:
+        postnummer, vejnavn, husnummer = _client.resolve_address(q)
+    except RuntimeError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    data = fetch_sales_history(vejnavn, husnummer, postnummer)
+    if data is None:
+        raise HTTPException(status_code=502, detail="Could not fetch sales data")
+    return data
 
 
 REJSEPLANEN_BASE_URL = "https://www.rejseplanen.dk/api"
@@ -557,6 +588,13 @@ def report(q: str = Query(...), layers: str = Query(default="")):
         except Exception:
             pass
 
+    # Fetch historical sales
+    sales_data = None
+    try:
+        sales_data = fetch_sales_history(vejnavn, husnummer, postnummer)
+    except Exception:
+        pass
+
     # Fetch neighbourhood statistics
     demographics = None
     price_trend = None
@@ -587,6 +625,7 @@ def report(q: str = Query(...), layers: str = Query(default="")):
         bbr_data=bbr_data,
         demographics=demographics,
         price_trend=price_trend,
+        sales_history=sales_data,
         generated_at=datetime.now().strftime("%d-%m-%Y %H:%M"),
     )
     pdf_bytes = _render_pdf(html_content)
