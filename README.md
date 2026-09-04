@@ -1,3 +1,56 @@
+# Nabo kort (nosy-neighbour)
+
+> Slå danske ejendomsoplysninger op fra tinglysning.dk via et kort-baseret webinterface eller en kommandolinje: ejere, vurdering, estimeret friværdi, hæftelser (med estimeret lånetype) og servitutter.
+
+> **Status i Paperclip:** `planned` · **Repo:** [github.com/qvisty/nosyneighbour](https://github.com/qvisty/nosyneighbour) · Del af ClipCores portefølje af små, nyttige web-værktøjer.
+
+---
+
+## Formål og vision
+
+Formålet er at gøre det let at få et hurtigt, samlet overblik over en dansk ejendom ud fra en adresse — ejere, vurdering, estimeret friværdi, hæftelser og servitutter — enten via et kort i browseren eller på kommandolinjen. Det sparer manuelt opslag flere steder og giver et brugbart naboer-/ejendomsoverblik.
+
+Visionen er et enkelt, driftsklart værktøj, der er nemt at slå op i og køre — i tråd med ClipCores mission om lav kompleksitet og tydelig værdi.
+
+## Slutmål (Definition of Done)
+
+- Et driftsklart værktøj, der pålideligt slår ejendomsoplysninger op fra offentlige danske kilder.
+- Kørende og tilgængeligt (deployment), så det kan bruges uden lokal opsætning.
+
+## Nuværende status
+
+- **Fase:** Fungerende værktøj — afventer drift/deployment (`planned`)
+- **Prioritet:** medium
+- **Hvor langt er vi:** Værktøjet er teknisk modent (se detaljeret dokumentation nedenfor): kort-UI med adresse-autocomplete (DAWA) og reverse-geocoding (Dataforsyningen), CLI, et `/api/lookup`-endpoint, lånetype-estimering mod Nationalbankens/DST's rentestatistik (og definitiv bekræftelse via ESMA FIRDS ved kendt ISIN) samt en MCP-server. Docker/Compose + Caddy-deployment er forberedt.
+- **Seneste milepæl:** Fuldt fungerende web-UI, CLI, API og MCP-server samt deployment-opsætning (Docker + Caddy).
+
+> **Ærlig note:** Ejer-ønsket er at få projektet "op at køre" — dvs. det primære udestående er et stabilt, offentligt tilgængeligt deployment, ikke ny kernefunktionalitet.
+
+## Planlægning og faser
+
+- ✅ **Fase 1 — Kernefunktion:** Opslag af ejendomsdata (ejere, vurdering, hæftelser, servitutter).
+- ✅ **Fase 2 — Grænseflader:** Kort-UI, CLI, API og MCP-server.
+- 🔧 **Fase 3 — Deployment:** Kør værktøjet stabilt og offentligt (Docker + Caddy/DuckDNS er forberedt).
+- ⬜ **Fase 4 — Drift:** Overvågning, vedligehold og evt. brugeradgang.
+
+## Mangler på kort sigt (næste skridt)
+
+- [ ] Deploy værktøjet, så det er offentligt tilgængeligt og stabilt.
+- [ ] Verificér HTTPS/DuckDNS-opsætningen i produktion.
+- [ ] Test end-to-end mod rigtige adresser efter deployment.
+
+## Mangler på lang sigt (roadmap)
+
+- [ ] Overvågning og drift-rutiner.
+- [ ] Evt. adgangsstyring/rate limiting.
+- [ ] Løbende tilpasning, hvis datakilderne ændrer format/vilkår.
+
+## Teknik, brug og API (detaljeret)
+
+Nedenfor følger den detaljerede tekniske dokumentation (engelsk).
+
+---
+
 # nosy-neighbour
 
 Look up Danish property records from [tinglysning.dk](https://www.tinglysning.dk) via a map-based browser UI or a command-line tool.
@@ -9,7 +62,6 @@ Given any freeform Danish address you get:
 - **Estimated equity** (friværdi) — valuation minus total registered mortgage principals
 - **Mortgages and liens** (hæftelser) — including estimated loan type (F-kort / F1 / F3 / F5) for variable-rate realkreditlån
 - **Easements** (servitutter)
-- **Historical sales** (historiske handler) — previous sale prices for the address with date, price per m² and sale type, via [Boliga](https://www.boliga.dk)'s public register of published sales
 
 Loan type estimation works by matching the registered coupon rate against [Nationalbanken rate statistics](https://www.dst.dk/da/Statistik/emner/penge-og-kapitalmarked/renter/realkreditrenter) (DST table DNRNURI). When an ISIN is known, the type is confirmed definitively via [ESMA FIRDS](https://registers.esma.europa.eu).
 
